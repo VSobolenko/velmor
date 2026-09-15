@@ -1,0 +1,37 @@
+# Pre-commit is run through uvx rather than added to the dev dependency group, so
+# the hook versions stay in this file and nothing extra is installed into the
+# project environment. Run it with:
+#
+#   uvx pre-commit install
+#   uvx pre-commit run --all-files
+#
+# This is a commit-time gate only. It does not replace the test suite or /review.
+
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+      - id: check-toml
+      - id: check-json
+      - id: check-merge-conflict
+      - id: check-added-large-files
+        args: ['--maxkb=1024']
+      # Belt and braces with .cursor/hooks/secret-guard.cjs: that hook gates the
+      # agent's writes, this one gates the commit itself.
+      - id: detect-private-key
+      # Matches .cursor/rules/01-security-secrets.mdc. Committing to main
+      # directly is not the workflow.
+      - id: no-commit-to-branch
+        args: ['--branch', 'main', '--branch', 'master']
+
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    # Pinned to the same version as the dev dependency in pyproject.toml.
+    rev: v0.15.22
+    hooks:
+      # No --fix: a hook that rewrites code silently hides what changed. The
+      # lint-feedback hook already reports violations at edit time.
+      - id: ruff-check
+      - id: ruff-format

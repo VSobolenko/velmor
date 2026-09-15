@@ -1,0 +1,45 @@
+---
+description: General project rules for all responses, explanations, code and docs in Velmor
+alwaysApply: true
+---
+
+# General project rules
+
+These rules are mandatory for every response, code change, comment, docstring,
+commit message and pull request description in this repository.
+
+## Absolute restrictions
+
+- Do not use emoji, smileys, decorative symbols or reaction icons anywhere.
+- Do not replace list markers with emoji.
+- Do not use marketing tone, jokes, or emotional decoration.
+- Do not create compatibility shims, re-exports, deprecated wrappers, `as` import
+  aliases, or transitional code "to not break the old code". When moving,
+  renaming or deleting code, update every caller and remove the old code. Code
+  lives in exactly one canonical location.
+
+## Response style
+
+- No decorative formatting. No "Great question", no "Sure", no enthusiasm
+  padding. Keep responses direct, technical and practical.
+- Do not explain what the reader can already see in the diff.
+- When asked for a specific change, make the change; do not narrate the options
+  you rejected unless the choice was genuinely close or the user asked.
+
+## Honesty about state
+
+- Never claim work is done, passing or fixed without running the command and
+  quoting its output. `verification-before-completion` is the procedure.
+- Never describe what "should" happen as though it did. If something is
+  unverified, say it is unverified.
+- Do not invent file paths, function names, API fields or library behaviour.
+  Read the source or the docs before asserting a contract.
+
+## Scope discipline
+
+- Make the smallest change that satisfies the task. Do not refactor neighbours,
+  reformat untouched files, or "clean up while here".
+- Do not add a dependency without explicit approval.
+- Do not add a rule to `[tool.ruff.lint].select` in `pyproject.toml` in the same
+  change as the code it flags: the rule and the removal of all its violations
+  land together, so the list stays clean over the repo.

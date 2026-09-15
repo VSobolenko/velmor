@@ -1,0 +1,116 @@
+schema: spec-driven
+
+# Project context. Shown to the AI when it creates artifacts. These are
+# constraints for the writer, not content to copy into an artifact.
+context: |
+  Velmor is a rights-verified marketplace platform. It discovers digital goods
+  on the open internet, decides whether each one may legally be resold, and only
+  then offers it for sale. Two products run on one core:
+
+    Velmor Rights  - B2B: given a good and its claimed licence, return a
+                     defensible verdict on what a buyer may do with it.
+    Proofbasket    - B2C: the storefront over the goods that passed the gate.
+
+  The product is not a catalogue and not a crawler. It is a rights decision with
+  a shop attached, and that ordering matters in every design: a good that cannot
+  be justified is not listed, even if it is popular.
+
+  Stack:
+    - Python 3.13, uv workspace, hatchling, ruff (lint + format), pytest.
+    - Deterministic Python for policy and verdicts. LangGraph for agent
+      orchestration (branching, cycles, human-in-the-loop, resumable state).
+      Pydantic AI for one structured extraction at a time. DeepAgents for
+      open-ended long-horizon research.
+    - PostgreSQL via SQLAlchemy 2.x async + asyncpg; Redis for queues and
+      ephemeral state. LangGraph checkpointing uses AsyncPostgresSaver.
+    - Saleor for the storefront and Stripe for payments. Both are integrated
+      behind a package under packages/services, never called from an agent node.
+    - Logfire for tracing; Langfuse for LLM observability (prompt versions,
+      cost, evals). OpenInference instrumentors bridge the two.
+    - No TypeScript and no Node in this repository.
+
+  Layout:
+    velmor/                     composition root: CLI, container, agent commands.
+                                The only place that picks concrete classes.
+    packages/core/              settings, environment, fs guard, errors.
+                                Imports nothing else from this repo.
+    packages/services/          domain models, rights engine, connectors,
+                                persistence, integrations.
+    packages/scout/             discovery agent: find candidates.
+    packages/auditor/           verification agent: build evidence, decide.
+    packages/api/               FastAPI surface (B2B verify, webhooks, health).
+
+  Non-negotiable design rules:
+    - Deny by default. An unrecognised licence is denied, never guessed.
+    - The rights verdict is a pure function of its inputs. No model, clock or
+      network call may influence it. Models propose evidence, never verdicts.
+    - Nothing reaches the storefront without GateDecision.PUBLISHABLE.
+    - Every refusal carries at least one human-readable reason.
+    - A verdict is append-only; a correction is a new record with an author.
+    - Changing the licence policy table changes what the company may legally
+      sell, so it is a policy decision that needs a human reviewer.
+
+  Conventions: see AGENTS.md and .cursor/rules/. The conventions there win over
+  generic advice, and .cursor/rules/02-architecture-layers.mdc fixes the allowed
+  import direction between packages.
+
+rules:
+  proposal:
+    - State the licence concern explicitly - which licence action, which evidence,
+      and what the platform refuses if the evidence is missing.
+    - Include a "Non-goals" section. Most scope creep here arrives as an
+      unstated ambition to cover one more source.
+    - Do not propose a feature that treats a model's judgement as a verdict.
+    - State whether the change can alter an existing verdict, and if so, whether
+      ENGINE_VERSION must be bumped.
+    - Prefer one source done completely (declared licence, evidence, gate,
+      provenance recorded) over several sources done partially.
+  specs:
+    - Write requirements as observable behaviour of the system, not as an
+      implementation plan. "The gate SHALL refuse X and state why" is a
+      requirement; "add a field to the gate" is not.
+    - Every requirement that touches the rights engine needs a scenario for the
+      refusal path, not only the acceptance path.
+    - Use the exact domain vocabulary - Candidate, Evidence, RightsVerdict,
+      RightsAction, LicenseGrant, GateDecision. Do not invent synonyms.
+    - A requirement about an external source must name what happens when the
+      source is unavailable, malformed, or contradicts itself.
+    - Do not specify a field name that contradicts an existing model in
+      packages/services/src/domain/.
+  design:
+    - Say which layer each new piece belongs to and why, per
+      .cursor/rules/02-architecture-layers.mdc.
+    - Justify the framework choice explicitly when agent code is involved - plain
+      Python, LangGraph, Pydantic AI or DeepAgents, per
+      .cursor/rules/05-agent-graphs.mdc. "It is an agent task" is not a reason.
+    - Record what is deliberately not done and what would have to be true to do
+      it later.
+    - Name the failure modes and which one the design accepts.
+    - Any new dependency needs a stated reason and a security note.
+  tasks:
+    - Each task is a unit one implementer subagent can finish and a reviewer can
+      judge on its own.
+    - A task that changes the licence policy table is called out as a policy
+      change so the reviewer knows to scrutinise it.
+    - Include the tests in the task that adds the behaviour, not in a trailing
+      "add tests" task.
+    - Order tasks so the deterministic layer is complete and tested before any
+      agent node depends on it.
+
+operations:
+  apply:
+    guidance:
+      - Run `uv run ruff check` and `uv run python -m pytest packages -q` after
+        each task, not once at the end. A broken import deep in the layer stack
+        is cheaper to find immediately.
+      - When a task turns out to need an exception to the rights rules to make it
+        pass, stop. That is a signal the design is wrong, not that the rule is
+        negotiable.
+      - Do not add a ruff rule to `[tool.ruff.lint].select` in a different change
+        from the one that removes its violations.
+  archive:
+    guidance:
+      - Summarise what changed in what Velmor may publish, if anything. An
+        archive note that does not mention the effect on the catalogue is hiding
+        the interesting part.
+      - If ENGINE_VERSION moved, say so explicitly in the summary.

@@ -1,0 +1,71 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  checks:
+    name: lint, types and unit tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          # The version is pinned in pyproject.toml's requires-python, and uv reads it.
+          enable-cache: true
+
+      - name: Install Python and sync the workspace
+        run: |
+          uv python install
+          uv sync --locked
+
+      - name: Lint
+        run: uv run ruff check
+
+      - name: Format check
+        run: uv run ruff format --check
+
+      - name: Import sanity
+        run: uv run python -m compileall -q packages velmor
+
+      # Integration and eval markers are deselected by addopts in pyproject.toml,
+      # so this job needs no database, no Redis and no API key.
+      - name: Unit tests
+        run: uv run python -m pytest packages -q
+
+      - name: Architecture boundaries
+        run: |
+          uv run python -m pytest packages/core/tests/unit/architecture -q
+
+  specs:
+    name: openspec validation
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Validate every active change
+        run: |
+          uv python install
+          # openspec is a Node CLI; it is tooling, not a project dependency.
+          for change in $(npx -y openspec list --json | jq -r '.changes[]?.name // empty'); do
+            echo "validating $change"
+            npx -y openspec validate --strict "$change"
+          done

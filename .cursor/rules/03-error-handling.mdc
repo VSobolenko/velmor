@@ -1,0 +1,92 @@
+---
+description: try/except is forbidden unless explicitly authorized, named, and provable
+alwaysApply: true
+---
+
+# Error handling: try/except is forbidden by default
+
+`try/except` is not a safety net, not a fallback, not "just in case", and not a
+way to fix a reported error. Write the code without it unless one of the
+authorizations below exists. **Silence in the task is not authorization.**
+
+## The only allowed cases
+
+1. The human explicitly asked for it in this task ("catch this one").
+2. The human explicitly named what to catch ("handle the 429 from the source").
+3. The exception is part of a documented contract and handling it *is* the logic,
+   so the code cannot work without the catch. Name the contract and its source.
+4. No other path exists at all. Rare, and must be stated explicitly.
+
+## Deciding requires proof, not a story
+
+If you conclude a `try` falls under case 3 or 4, prove it:
+
+- Cite the exact source: the doc line, the library source, the API contract, the
+  framework requirement, with file or URL and the quote, and name the exception
+  class at that location.
+- Show the alternatives were evaluated and fail: letting it propagate, fixing the
+  producer, a guard, a retry, a validating model. "There is no other path" is only
+  true after you have shown the other paths failing.
+- Point to the call site that cannot be changed, not to a place you could rewrite.
+
+If proving it requires guessing at behaviour you have not verified, the answer is
+no. Unverifiable is the same as unauthorized.
+
+## Fixing a bug is not authorization
+
+A task like "fix this error" does not permit wrapping the failing call. Find the
+cause and correct it: the wrong input, the malformed request, the unset field, the
+bad producer. Most reported errors are bad data or a bad request upstream, not a
+missing catch. Catching turns a visible bug into a silent one and leaves the cause
+alive.
+
+## In this codebase, the consequence is worse than usual
+
+The rights engine reports refusals through values, not exceptions: a
+`RightsVerdict.DENIED` or `UNKNOWN` plus a populated `reasons` tuple. A `try`
+around `PublicationGate.decide` would convert a documented refusal into an
+unlogged absence, and an item that is missing from the storefront with no reason
+attached is exactly the failure this project exists to prevent. Never wrap the
+gate.
+
+A source connector failing is not an error to swallow either: `ScoutJob` collects
+it into `SourceFailure` deliberately, so a broken upstream is visible in the run
+report rather than silently shrinking the funnel.
+
+## An existing `try/except` is not a precedent
+
+Existing handling in a neighbouring file is grandfathered: do not remove it
+without a request, and do not treat it as permission to add a new one. Each new
+`try` needs its own authorization.
+
+## `raise` is required, not optional
+
+- Fail fast on empty, malformed or unexpected external data: raise, never coerce
+  to `None`, `{}`, `[]`, or a default.
+- Translate errors with the cause attached: `raise DomainError(...) from error`.
+- Validate external payloads into a typed model at the boundary. Pydantic raising
+  on a malformed API response is the intended behaviour; do not catch it to
+  return a partial object.
+
+## Implicit catching is the same violation
+
+`contextlib.suppress`, bare `except:`, `except ...: pass`,
+`except Exception: return None`, and `except: log and continue` are forbidden
+under the same terms.
+
+## Not affected
+
+- `try/finally` without `except`, for resource cleanup.
+- `pytest.raises` in tests: that is an assertion, not a catch.
+- A single documented conversion of a domain error into a CLI exit code, where a
+  traceback is not a useful interface. Such a site must name its case in a
+  comment.
+
+## Before writing `try`
+
+- [ ] Is there an explicit request or a documented contract? Quote it with its source.
+- [ ] Is the exception specific (never `Exception`)?
+- [ ] Does the handler do real recovery rather than hide the failure?
+- [ ] Can you prove it: cited contract, alternatives ruled out, unchangeable call site?
+
+If any answer is no, delete the `try` and fix the cause.

@@ -1,0 +1,34 @@
+{
+  "version": 1,
+  "hooks": {
+    "preToolUse": [
+      {
+        "command": "node .cursor/hooks/secret-guard.cjs",
+        "matcher": "^(Write|StrReplace|EditNotebook)$",
+        "timeout": 10,
+        "failClosed": true
+      },
+      {
+        "command": "node .cursor/hooks/policy-guard.cjs",
+        "matcher": "^(Write|StrReplace|EditNotebook)$",
+        "timeout": 10,
+        "failClosed": true
+      }
+    ],
+    "beforeShellExecution": [
+      {
+        "command": "node .cursor/hooks/destructive-guard.cjs",
+        "timeout": 10,
+        "failClosed": false
+      }
+    ],
+    "postToolUse": [
+      {
+        "command": "node .cursor/hooks/lint-feedback.cjs",
+        "matcher": "^(Write|StrReplace)$",
+        "timeout": 60,
+        "failClosed": false
+      }
+    ]
+  }
+}

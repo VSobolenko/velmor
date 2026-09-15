@@ -1,0 +1,53 @@
+# Python
+__pycache__/
+*.py[codz]
+*.so
+
+# Virtual environment — created inside Docker
+.venv/
+env/
+venv/
+
+# Git
+.git/
+.gitignore
+
+# IDE
+.idea/
+.vscode/
+
+# Cache
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+.cache/
+
+# Environment files — never in the image, always mounted from the host
+.env
+.env.*
+
+# Internal agent tooling — not needed at runtime
+.agents/
+.cursor/
+.github/
+openspec/
+skills-lock.json
+AGENTS.md
+CLAUDE.md
+
+# Documentation — not needed in the image
+docs/
+
+# Local data and artifacts
+data/
+artifacts/
+extracted_images/
+
+# Build artifacts
+build/
+dist/
+*.egg-info/
+
+# OS files
+.DS_Store
+Thumbs.db

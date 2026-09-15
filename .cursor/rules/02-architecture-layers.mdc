@@ -1,0 +1,66 @@
+---
+description: Object lifetime, ownership, and the fixed dependency direction between layers
+alwaysApply: true
+---
+
+# Ownership and dependency direction
+
+## Object lifetime
+
+Every long-lived dependency has an owner and a lifetime. Do not invent
+process-wide shared state by accident.
+
+- Create the object where its lifetime begins: the composition root
+  (`velmor/container.py`, `velmor/cli.py`) or the function that owns the run.
+- Pass it explicitly, as a constructor argument. A caller that needs the resource
+  receives that instance; it does not reach into a module for a hidden global.
+- A second process, a test, or a parallel agent run must be able to construct a
+  fresh instance without monkeypatching module attributes.
+
+Forbidden:
+
+- Module-level mutable instances standing in for dependency injection:
+  `client = Client()`, `_cache = {}` used as the application's shared service.
+- Free getters over that state: `get_client() -> Client | None` reading a module
+  global.
+- Importing a configured singleton and calling methods on it from a service.
+
+Immutable module-level constants are fine: enums, `tuple` policy tables,
+`ENGINE_VERSION` strings. `DefaultLicenseGrants.TABLE` is a constant by design;
+a repository handle is not.
+
+## Dependency direction
+
+The layers are fixed. An arrow means "may import".
+
+```
+velmor/  (composition root: cli, container, agents/*)
+   |
+   v
+packages/scout, packages/auditor      (agents: may import services + core)
+   |
+   v
+packages/services                     (domain, rights, connectors, integrations)
+   |
+   v
+packages/core                         (settings, environment, fs, errors)
+```
+
+Rules that follow from it:
+
+- `packages/core` imports nothing from this repository except itself. It must not
+  know that agents, rights, Saleor or LLMs exist.
+- `packages/services` imports `packages/core` and nothing from the agents. The
+  rights engine must never import LangGraph, an LLM provider, or a connector.
+- An agent imports `packages/services` and `packages/core`. It must not import
+  another agent.
+- The composition root is the only place that knows about all of them.
+
+Why the rights engine in particular must stay free of the agent stack: the
+publication gate is the component that decides what the company may legally sell.
+If it can reach a model or a framework, it becomes possible to reason about
+publishing with something non-deterministic. Keeping it a pure function of its
+inputs is what makes a verdict reproducible and auditable.
+
+This direction is enforced by `packages/core/tests/unit/architecture/test_layering.py`,
+not only by this document.

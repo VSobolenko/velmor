@@ -1,0 +1,171 @@
+---
+description: Python coding rules for this project
+globs: **/*.py
+alwaysApply: false
+---
+
+# Python rules
+
+Target: Python 3.13, `uv` workspace, `ruff` (lint + format), `pytest`.
+
+## Architecture and style
+
+- Follow the existing structure and naming. Do not introduce a new pattern for
+  one file.
+- Strict OOP: logic lives in class methods, not module-level functions. Helper
+  logic goes into a private method of the class that owns it.
+- A module contains imports, class definitions, module-level constants, and at
+  most the sanctioned entry-point exceptions below.
+- A method does one thing. Split a long method into private methods rather than
+  letting it grow.
+- Do not add an abstraction layer that has exactly one implementation and no
+  near-term second one.
+
+### Sanctioned module-level functions
+
+Two, and only two, because a framework requires them:
+
+1. `typer` command callbacks (`@app.command()`). They stay thin: declare
+   arguments, delegate to a class, format the result and the exit code. No
+   business logic.
+2. The console-script shim.
+
+Everything else is a method on a class. If you are about to write a module-level
+`_helper()`, the class that needs it owns it as `self._helper()`.
+
+## Data structures
+
+- Prefer typed models (Pydantic, dataclasses) over raw `dict` / `list`. Do not
+  push bare dicts through the call chain.
+- When an object is available, read its attributes directly. Do not convert it to
+  a dict to read it.
+- Do not use `.get(key, default)` to paper over a possibly-missing key. Access
+  `data[key]` so a missing required key raises at the source of the bug.
+- Do not probe the shape of an unknown value with `isinstance(x, dict)` /
+  `isinstance(x, list)`, or with a "dict-or-attribute" reader that tries
+  `x.get(k)` then `getattr(x, k, None)`. That pattern exists only because the real
+  type was never pinned down. Pin the type.
+- Do not use truthiness to pick a value or a default: `x or 0`, `value or
+  fallback`, `denominator or 1`. A falsy-but-valid value (`0`, `''`, `[]`) must
+  not be silently replaced. Test for absence with `is None`.
+
+## Models
+
+- A model is a plain typed data container. It has fields with type annotations and
+  no behaviour: no getters, no properties, no `require_*` helpers, no
+  `__post_init__`, no `model_post_init`, no `@field_validator` /
+  `@model_validator`. Unless the task explicitly asks for a method on the model, a
+  method on the model is wrong: the logic belongs in a service, resolver or gate.
+- A model rejects bad input through Pydantic's own type validation, not through a
+  hand-written method. Never write `require_price()` that raises: report the
+  problem where the value was produced or consumed.
+- Fields are required by default. Do not write `Field(default=...)` or
+  `default_factory=...`. `default_factory=list` is how a mutable default sneaks in
+  and how "this was empty" becomes indistinguishable from "nobody filled it".
+  A default exists only when the field is genuinely optional and the task says so;
+  then write `X | None` with an explicit `None` default and say why.
+- If a field holds a wrong value, the fault is in the code that built the model.
+  Fix the producer; do not widen the model to accept bad data.
+- `model_config` for `frozen` or serialisation is config, not behaviour, and is
+  allowed.
+
+## Parameters and types
+
+- Required by default. Do not add a default (`= None`, `= 0`, `= ''`, `= []`) or
+  `X | None` unless the caller genuinely may omit the value and the task says so.
+- `None` in a type must mean a real, intentional absence, not insurance.
+- No defensive `is None` checks on a parameter that was declared required.
+- Annotate every parameter and every return type, including `-> None`.
+- Do not use `Any`, bare `dict` / `list`, or a broad union to loosen a type. Use
+  the precise type. `Any` is for genuinely shapeless data; a protocol, generic or
+  model is always preferred.
+
+## Constants
+
+- Name magic numbers and strings. Declare constants at class level, not inside a
+  method and not loose at module level (module-level `StrEnum` and policy tables
+  like `DefaultLicenseGrants.TABLE` are the exception, and are constants by
+  intent).
+- No unexplained literal in logic.
+
+## Settings
+
+- Settings are read only through the `SettingsLoader.required_*` accessors. There
+  is no optional accessor and no fallback, by design: a missing variable must fail
+  at bootstrap.
+- Do not add `optional_*` / `has_or_default` helpers to make a missing value
+  quiet. `SettingsLoader.has()` exists only for contract checks over *optional*
+  sources and must never select a platform default.
+- A setting with a fixed value is a class constant, not an environment variable.
+
+## Error handling
+
+- `try/except` is forbidden unless authorized and proven. See
+  `.cursor/rules/03-error-handling.mdc`; that rule is canonical.
+- Fix the cause, not the symptom. Trace a bad value back to where it was produced
+  and fix it there.
+
+## Libraries and external APIs
+
+- Before using a library function, field or option, verify its actual behaviour
+  from the docs or the source: what it returns, whether it can be `None`, which
+  exceptions it raises, what it mutates. Do not code against a half-remembered
+  API. `context7` is there for this.
+- Write against the real contract: if a call always returns an object, do not
+  check for `None`; if it raises instead of returning `None`, do not check for
+  `None`.
+- Do not add defensive checks for states the library's contract excludes.
+
+## Attribute access
+
+- Prefer direct attribute access. `getattr`, `setattr` and `hasattr` are forbidden
+  unless the attribute name is itself runtime data.
+- Never write a "read from dict or from attribute" helper. Pin the type.
+
+## Imports
+
+- All imports at the top of the module, grouped and sorted (ruff `I` enforces the
+  order).
+- An import inside a function is allowed only to break a genuine circular
+  dependency or to keep an optional, heavy dependency out of process start. Both
+  cases get a comment naming the reason. `observability.py` importing the
+  instrumentors lazily is the sanctioned example.
+
+## Logging
+
+- In a business method, logging occupies at most one statement: either a single
+  `self._logger.info(...)` / `debug` / `warning` / `error`, or one call to a
+  private log helper.
+- If the message needs locals, joins or formatting beyond a short inline
+  expression, move the whole log, including the logger call, into a private
+  method.
+
+```python
+# BAD - a format helper while the logger stays in the business method
+self._logger.info(f'Resolved {self._format_sources()}')
+
+# BAD - locals built next to business logic
+sources = ', '.join(s.id for s in self._sources)
+self._logger.info(f'Resolved {sources}')
+
+# GOOD - one short inline statement
+self._logger.info(f'Run {self._run_id}; sources {len(self._sources)}')
+
+# GOOD - the whole log, logger included, in a private method
+self._log_resolved_sources()
+
+def _log_resolved_sources(self) -> None:
+    sources = ', '.join(spec.id for spec in self._specs)
+    self._logger.info(f'Resolved sources: {sources}')
+```
+
+## Comments
+
+- No `TODO` / `FIXME` unless asked.
+- No comment that restates the code. A comment explains *why*, and a docstring on
+  a class explains the invariant a reader cannot see from the signature. If the
+  code needs a comment to be understood, simplify the code first.
+
+## Console output
+
+- No decorative separators or dividers in CLI output.

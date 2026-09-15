@@ -1,0 +1,39 @@
+# Line endings are normalised to LF in the repository, whatever the machine.
+#
+# `core.autocrlf=true` is a common Windows default, and it is wrong for this
+# repository: the vendored skill collections carry shell scripts, and a CRLF
+# `#!/usr/bin/env bash` script fails under Git Bash and WSL. Git would rewrite
+# them on every checkout and the working tree would drift from the index
+# without a single content change.
+#
+# `text=auto` makes Git decide what is text; the explicit rules below fix the
+# cases where the decision has to be made for it.
+
+* text=auto eol=lf
+
+# Shell scripts are executed, never read by a Windows tool that wants CRLF.
+*.sh text eol=lf
+
+# Windows-only interpreters require CRLF.
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.ps1 text eol=crlf
+
+# These are opaque to Git: normalising them can corrupt the bytes.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.woff binary
+*.woff2 binary
+*.pdf binary
+
+# Lock files are generated and diffed for review only.
+uv.lock text eol=lf
+package-lock.json text eol=lf
+
+# Virtual environments and caches are never tracked; this is belt and braces
+# with .gitignore, and holds even if a file is added with `git add -f`.
+.venv/** -text
+**/__pycache__/** -text

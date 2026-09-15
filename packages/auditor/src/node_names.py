@@ -1,0 +1,5 @@
+COLLECT_DECLARED_EVIDENCE = 'collect_declared_evidence'
+RESOLVE_LICENSE = 'resolve_license'
+INVESTIGATE = 'investigate'
+REVIEW = 'review'
+DECIDE = 'decide'

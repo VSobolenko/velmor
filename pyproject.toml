@@ -1,0 +1,113 @@
+[project]
+name = "velmor"
+version = "0.1.0"
+description = "Velmor — rights-verified marketplace platform"
+readme = "README.md"
+requires-python = ">=3.13,<3.14"
+dependencies = [
+    "aiohttp>=3.14.3",
+    "alembic>=1.20.0",
+    "anthropic>=1.6.0",
+    "asyncpg>=0.31.0",
+    "beautifulsoup4>=4.15.0",
+    "deepagents>=0.7.14",
+    "fastapi>=0.141.1",
+    "httpx>=0.28.1",
+    "langchain>=1.4.0",
+    "langchain-core>=1.6.3",
+    "langchain-openai>=1.6.2",
+    "langfuse>=4.15.3",
+    "langgraph>=1.2.11",
+    "langgraph-checkpoint>=4.2.0",
+    "langgraph-checkpoint-postgres>=3.1.2",
+    "logfire>=5.1.0",
+    "loguru>=0.7.3",
+    "openai>=3.14.0",
+    "openinference-instrumentation-anthropic>=2.1.5",
+    "openinference-instrumentation-langchain>=0.1.76",
+    "openinference-instrumentation-openai>=0.1.60",
+    "pydantic>=2.13.5",
+    "pydantic-ai>=2.43.0",
+    "pydantic-settings>=2.15.0",
+    "python-dotenv>=1.2.3",
+    "redis>=8.1.0",
+    "sqlalchemy[asyncio]>=2.0.53",
+    "stripe>=15.6.1",
+    "typer>=0.27.2",
+    "uvicorn[standard]>=0.53.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project.scripts]
+velmor = "velmor.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["velmor", "packages"]
+
+[tool.hatch.metadata]
+allow-direct-references = true
+
+[tool.uv]
+package = true
+
+[dependency-groups]
+dev = [
+    "ariadne-codegen>=0.19.0",
+    "basedpyright>=1.40.1",
+    "mypy>=2.3.1",
+    "pytest>=9.1.1",
+    "pytest-asyncio>=1.4.0",
+    "pytest-httpx>=0.36.2",
+    "pytest-xdist>=3.8.0",
+    "ruff==0.15.22",
+]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["packages", "velmor"]
+markers = [
+  "integration: marks tests as integration (deselected by default)",
+  "eval: golden-dataset LLM evaluation (run manually, requires a live LLM)",
+]
+addopts = "-m 'not integration and not eval'"
+
+[tool.ruff]
+target-version = "py313"
+line-length = 100
+extend-exclude = [
+  ".agents",
+  "openspec/changes/archive",
+  "packages/services/src/saleor/generated",
+]
+
+[tool.ruff.lint]
+# Rules are adopted one at a time: a rule is added here only in the same change
+# that removes every violation of it, so this list is always clean over the repo.
+select = [
+  "W",
+  "F401",
+  "F541",
+  "F821",
+  "I",
+  "RUF022",
+  "E701",
+  "E702",
+]
+
+[tool.ruff.lint.isort]
+known-first-party = ["packages", "velmor"]
+
+[tool.ruff.format]
+# The codebase is written with single quotes throughout, following the
+# StandardJS style the project came from. Without this, `ruff format` rewrites
+# every string in the repository, so a formatting run would be a huge diff that
+# changes nothing meaningful.
+quote-style = "single"
+
+[tool.basedpyright]
+pythonVersion = "3.13"
+reportMissingTypeStubs = false
+include = ["packages", "velmor"]

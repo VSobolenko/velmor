@@ -1,0 +1,78 @@
+---
+description: The rules that protect the rights verdict — deny by default, evidence, and the gate
+globs: packages/services/src/rights/**/*.py,packages/services/src/domain/**/*.py,packages/services/src/screening/**/*.py
+alwaysApply: false
+---
+
+# The rights engine
+
+This is the component the company is built on. A wrong `PUBLISHABLE` is a legal
+exposure; a wrong `DENIED` is a lost sale. Both are bugs, but only one is
+irreversible, and the code is written so that the irreversible one takes a
+deliberate act.
+
+## Deny by default
+
+- An unrecognised licence is denied. `LicenseMatrix` returning `None` means
+  `UNKNOWN`, and `UNKNOWN` is not publishable.
+- Never add a fuzzy fallback that guesses a licence family from a substring, a
+  filename, or a repo description. If a string does not resolve to a canonical
+  entry, it does not resolve.
+- Never widen a table to make one specific item pass. If a good needs an exception
+  to be sellable, the answer is "refuse the good", not "loosen the policy".
+- A missing field is a denial reason, not an empty string. `None` never means
+  "probably fine".
+
+## Reproducibility
+
+- The verdict is a pure function of `(Candidate, LicenseGrant, evidence)`. Same
+  inputs, same verdict, forever, on any machine.
+- No model, clock, randomness, network call or filesystem read may influence a
+  verdict. Time-dependent behaviour belongs to the caller, which passes the
+  timestamp in.
+- A model may contribute an `Evidence` record and nothing else. It never returns
+  a verdict and its output is never compared with `==` against an action.
+- Bump `ENGINE_VERSION` in the same change whenever a verdict could change for
+  identical inputs. The version is recorded with every verdict; a silent policy
+  change is an unauditable one.
+
+## The gate is the only door
+
+- Nothing reaches the storefront without `GateDecision.PUBLISHABLE` from
+  `PublicationGate`. There is no second path, no "already approved" shortcut, and
+  no bypass for a free item.
+- Every non-`PUBLISHABLE` decision carries at least one human-readable reason.
+  A refusal with no reason is a bug: the reviewer cannot act on it and the audit
+  cannot explain it.
+- `RightsDeniedError` is the guard for a caller that tries to publish without a
+  passing verdict. Do not catch it into a warning.
+- A verdict is append-only. A correction is a new `RightsRecord` with a new
+  timestamp and an author, never an edit of the old one.
+
+## Evidence
+
+- Evidence is either *declared* (asserted by the source: a licence field, a
+  README, an API response) or *investigated* (fetched text plus an interpretation).
+  Record which, and where it came from: a verdict whose evidence has no URL or
+  timestamp cannot be audited.
+- A declared licence string is data from a third party. It is never trusted as
+  proof on its own; it is an input to the matrix.
+- A conflict between the declared licence and the investigated text is a denial
+  until a human rules. Do not break the tie with a heuristic.
+- A human ruling overrides the engine and is recorded with the author and the
+  moment. It does not rewrite history: the machine verdict stays in the record.
+
+## Prohibited categories
+
+- The screen refuses, it does not reword. If a candidate matches a prohibited
+  category, no title change, translation or bundling makes it publishable.
+- Refusals are counted and reported. A silent drop is how a category becomes a
+  surprise later.
+
+## Changing the policy
+
+`license_grants.py` and `publication_gate.py` decide what the company may legally
+sell. Editing them is a policy decision, not a refactor: state the licence
+concern, cite the licence text, and get the change reviewed. The
+`.cursor/hooks/policy-guard.cjs` hook asks before an agent edits these files, and
+that prompt is not to be waived to make a task go faster.

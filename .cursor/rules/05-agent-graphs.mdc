@@ -1,0 +1,84 @@
+---
+description: Rules for choosing an agent framework and for writing LangGraph graphs, nodes and state
+globs: packages/scout/**/*.py,packages/auditor/**/*.py,packages/services/src/llm/**/*.py
+alwaysApply: false
+---
+
+# Agents: pick the tool for the task
+
+Four tools live in this repository. Choosing the wrong one is the most expensive
+mistake available here, because it is cheap to write and expensive to unpick.
+
+| Tool | Use it when | Do not use it when |
+|------|-------------|--------------------|
+| Plain Python | The answer is decidable from the inputs: policy lookups, verdicts, gating, screening | Any judgement is needed |
+| LangGraph | Control flow is a graph: branching, cycles, retries, human-in-the-loop, resumable state | A straight line of calls would do |
+| Pydantic AI | One structured extraction from text into a typed model, with validation and retries | You need multi-step orchestration |
+| DeepAgents | Open-ended, long-horizon research where the path is unknown | The steps are known in advance |
+
+Escalation rule: start at the top of that table. Move down only when the layer
+above provably cannot express the requirement. A single `RiskAssessment` extraction
+is Pydantic AI, not a graph with three nodes. A five-branch verification flow with
+a review interrupt is LangGraph, not a growing `if` chain.
+
+## The verdict path is never an agent
+
+The rights decision is deterministic Python. No model, no graph, no framework may
+be on the path from evidence to `RightsVerdict`. A model may *propose* evidence
+(an extracted licence family, a flag) and that proposal becomes an `Evidence`
+record like any other; it never becomes the verdict. See
+`.cursor/rules/06-rights-engine.mdc`.
+
+## State
+
+- State is a `TypedDict`. Define it in `state.py` next to the graph; declare its
+  fields with the reducer where one is needed.
+- A node returns only the keys it changes. It does not return the whole state.
+- Anything a node needs must be reachable from the state it receives. No hidden
+  module-level cache, no closure over mutable configuration.
+
+## Nodes
+
+- A node is a method on a node class, and its signature is `state -> partial
+  state`. Nothing else writes the state.
+- Nodes are idempotent. A resumed run may re-execute any node from a checkpoint,
+  so a node that appends without de-duplicating or charges a card twice on resume
+  is a bug, not an edge case.
+- Side effects the run must not repeat (a push, a purchase, a publish) do not go
+  inside a node. The graph produces state; the runner performs the effect after
+  the graph has completed.
+- A node does not catch exceptions to keep the run alive. An upstream failure is
+  either a recorded failure carried in the state or an exception that fails the
+  run.
+- Conditional routing is a function of state only. Do not perform I/O in a
+  router.
+
+## Edges and termination
+
+- Route using the constants in `node_names.py`. Do not scatter string literals
+  through edge definitions: a typo'd node name is a silent unreachable branch.
+- Every cycle needs a hard bound. If a loop retries until a condition holds, the
+  state carries the attempt count and the router reads it, so a non-converging run
+  terminates instead of burning the budget.
+- The graph has exactly one terminal node per outcome. Model "gave up" as an
+  outcome, not as a path to the success node.
+
+## Interrupts and persistence
+
+- Human review uses `interrupt()`. Any graph that interrupts must run with a
+  checkpointer: without one, the interrupt cannot be resumed and the run is lost.
+- The checkpointer is opened by the composition root on demand
+  (`Container.checkpointer()`), never at import and never for a run that cannot
+  interrupt. Discovery has no state worth keeping across a restart.
+- A resumed run must be able to tell whether the human's ruling already exists.
+  Read it from the state or the store, never from a process variable.
+
+## Testability
+
+- Building the graph must not require a network, a database or an API key. A test
+  must be able to construct the compiled graph and invoke a single node offline.
+  Push provider construction into the node classes and inject the container.
+- Every node gets a unit test with a hand-built state. Do not test a node only
+  through a full graph run.
+- Routing gets its own table-driven test: one case per branch, including the
+  retry cap and the give-up path.
