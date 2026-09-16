@@ -13,6 +13,11 @@ class ResolveLicenseNode:
     the source's own field. Each step down that list is less reliable than the one
     above it, and the evidence records which one was used.
 
+    The node returns both halves of the outcome: the claim it settled on, and
+    the identity that claim resolved to. The decision reads the claim, so a
+    licence a person or a page established is the licence the record is judged
+    on, rather than whatever the source's own field happened to say.
+
     Resolving an identity is all this node does. Whether the resolved licence
     permits selling the good is the gate's decision, not this node's.
     """
@@ -28,7 +33,7 @@ class ResolveLicenseNode:
         grant = self._matrix.resolve(claim)
 
         if grant is None:
-            return {'resolved_license_id': None}
+            return {'license_claim': claim, 'resolved_license_id': None}
 
         evidence = Evidence(
             kind=EvidenceKind.SPDX_MATCH,
@@ -38,6 +43,7 @@ class ResolveLicenseNode:
             extractor_version=self.EXTRACTOR_VERSION,
         )
         return {
+            'license_claim': claim,
             'resolved_license_id': grant.license_id,
             'evidence': [*state['evidence'], evidence],
         }

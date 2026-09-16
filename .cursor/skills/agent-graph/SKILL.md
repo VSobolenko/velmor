@@ -43,8 +43,13 @@ This is already reflected in the repository, and the shape is the decision:
 | `packages/auditor/src/runner.py` | drives the graph, screens candidates first, and performs the effects afterwards |
 | `velmor/agents/auditor.py` | the CLI-facing agent that builds the container, calls the runner and prints the pass report |
 
-`AuditorState` carries `candidate`, `source`, `evidence`, `resolved_license_id`,
-`interpretation`, `investigation_attempts`, `human_ruling`, `record`, `decision`.
+`AuditorState` carries `candidate`, `source`, `evidence`, `license_claim`,
+`resolved_license_id`, `interpretation`, `investigation_attempts`, `human_ruling`,
+`record`, `decision`. The claim is the licence identity the run settled on - a
+human ruling over a model reading over the source's field - and the resolution is
+that claim mapped onto the policy table. `DECIDE` judges the claim, so a ruling a
+person made reaches the verdict instead of being discarded in favour of the
+source's own field.
 
 ## Rules that are easy to get wrong
 

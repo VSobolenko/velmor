@@ -14,6 +14,11 @@ class DecideNode:
     same verdict when it is re-run from a checkpoint. It makes no model calls and
     holds no policy of its own: the matrix decides what the licence permits and
     the gate decides whether that is enough to publish.
+
+    The licence it judges is the claim the run established - see the state's
+    ``license_claim`` - and not the source's own field. That is what lets a human
+    ruling and an investigated page reach the verdict, and what keeps the record
+    from being refused for a licence the evidence contradicts.
     """
 
     def __init__(
@@ -31,6 +36,7 @@ class DecideNode:
     async def __call__(self, state: AuditorState) -> dict:
         record = self._resolver.resolve(
             state['candidate'],
+            state['license_claim'],
             requested_actions=self._requested_actions,
             evidence=tuple(state['evidence']),
             decided_at=self._clock.now(),

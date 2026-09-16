@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from langgraph.checkpoint.memory import InMemorySaver
+from langgraph.graph.state import CompiledStateGraph
+from langgraph.types import Command
 
 from packages.auditor.src.graph import AuditorGraph
 from packages.auditor.src.runner import AuditorRunner
@@ -10,11 +12,13 @@ from packages.auditor.tests.conftest import (
     FakeInterpreter,
     FakePageFetcher,
     FixedClock,
+    build_state,
 )
 from packages.scout.src.ingest import ScoutJob
 from packages.services.src.connectors.contract import SourceConnector
+from packages.services.src.domain.interpretation import LicenseInterpretation
 from packages.services.src.domain.query import SearchQuery
-from packages.services.src.domain.rights import RightsVerdict
+from packages.services.src.domain.rights import EvidenceKind, RightsVerdict
 from packages.services.src.domain.verification_run import VerificationOutcome
 from packages.services.src.persistence.memory import InMemoryStore
 from packages.services.src.rights.engine import RightsEngine
@@ -215,3 +219,113 @@ class TestVerificationPath:
         assert refused.outcomes[0].outcome is VerificationOutcome.SCREENED_OUT
         assert refused_again.outcomes[0].outcome is VerificationOutcome.SCREENED_OUT
         assert store.decisions() == ()
+
+
+class TestHumanRulingPath:
+    """A person's ruling has to become the licence the decision rests on.
+
+    The graph pauses for review and resumes with the ruling. Before this, the
+    decision read the source's own field, so a ruling could resolve an identity,
+    record a human attestation for it, and the record would still be refused for
+    a licence the evidence no longer claimed.
+    """
+
+    THREAD = {'configurable': {'thread_id': 'human-ruling-path'}}
+
+    def build_app(self, engine: RightsEngine, clock: FixedClock) -> CompiledStateGraph:
+        return AuditorGraph(
+            engine=engine,
+            fetcher=FakePageFetcher(),
+            interpreter=FakeInterpreter(),
+            clock=clock,
+            model_name='test-model',
+            max_investigation_attempts=1,
+            escalation_confidence=ESCALATION_CONFIDENCE,
+            requested_actions=RightsEngine.STOREFRONT_ACTIONS,
+            checkpointer=InMemorySaver(),
+        ).build()
+
+    async def test_an_approved_ruling_publishes_the_good_it_named(
+        self, engine: RightsEngine, clock: FixedClock
+    ) -> None:
+        app = self.build_app(engine, clock)
+        # The source's own field is a licence the policy table does not know, which
+        # is the situation review exists for.
+        state = build_state(build_candidate(license_id='Velmor-Internal-Ware'), build_spec())
+
+        paused = await app.ainvoke(state, config=self.THREAD)
+        assert paused['__interrupt__']
+
+        resumed = await app.ainvoke(
+            Command(resume={'approved': True, 'license_id': 'CC0-1.0', 'note': 'checked'}),
+            config=self.THREAD,
+        )
+
+        assert resumed['license_claim'] == 'CC0-1.0'
+        assert resumed['record'].license_id == 'CC0-1.0'
+        assert resumed['decision'].publishable is True
+        assert resumed['decision'].reasons == ()
+        assert EvidenceKind.HUMAN_ATTESTATION in [item.kind for item in resumed['record'].evidence]
+
+
+class TestPageQuotePath:
+    """Whether a model reading can carry a publication depends on the page itself.
+
+    The quote the model chose is source evidence only when the page contains it,
+    so an invented sentence leaves the reading alone, which the gate refuses. A
+    quote the page really carries does back the reading, which is the whole point
+    of investigating an item whose source reports no licence.
+    """
+
+    PAGE_TEXT = 'All images on this page are licensed under CC BY 4.0.'
+
+    def build_app(
+        self, engine: RightsEngine, clock: FixedClock, interpretation: LicenseInterpretation
+    ) -> CompiledStateGraph:
+        return AuditorGraph(
+            engine=engine,
+            fetcher=FakePageFetcher(self.PAGE_TEXT),
+            interpreter=FakeInterpreter(interpretation),
+            clock=clock,
+            model_name='test-model',
+            max_investigation_attempts=1,
+            escalation_confidence=ESCALATION_CONFIDENCE,
+            requested_actions=RightsEngine.STOREFRONT_ACTIONS,
+            checkpointer=InMemorySaver(),
+        ).build()
+
+    async def test_an_invented_quote_cannot_carry_a_publication(
+        self, engine: RightsEngine, clock: FixedClock
+    ) -> None:
+        invented = LicenseInterpretation(
+            license_claim='CC0-1.0',
+            confidence=0.95,
+            quoted_text='This work has been dedicated to the public domain by its author.',
+            reasoning='the page claims a public domain dedication',
+        )
+        app = self.build_app(engine, clock, invented)
+        state = build_state(build_candidate(license_id=None), build_spec())
+
+        out = await app.ainvoke(state, config={'configurable': {'thread_id': 'invented-quote'}})
+
+        assert EvidenceKind.LICENSE_FILE not in [item.kind for item in out['record'].evidence]
+        assert out['decision'].publishable is False
+        assert any('interpretation' in reason for reason in out['decision'].reasons)
+
+    async def test_a_quote_the_page_carries_does_back_the_reading(
+        self, engine: RightsEngine, clock: FixedClock
+    ) -> None:
+        quoted = LicenseInterpretation(
+            license_claim='CC-BY-4.0',
+            confidence=0.95,
+            quoted_text=self.PAGE_TEXT,
+            reasoning='the page states a Creative Commons attribution licence',
+        )
+        app = self.build_app(engine, clock, quoted)
+        state = build_state(build_candidate(license_id=None), build_spec())
+
+        out = await app.ainvoke(state, config={'configurable': {'thread_id': 'verified-quote'}})
+
+        assert EvidenceKind.LICENSE_FILE in [item.kind for item in out['record'].evidence]
+        assert out['decision'].publishable is True
+        assert out['record'].license_id == 'CC-BY-4.0'

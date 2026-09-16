@@ -33,7 +33,10 @@ class ReviewNode:
         ruling = HumanRuling.model_validate(raw_ruling)
 
         if not ruling.approved or ruling.license_id is None:
-            return {'human_ruling': ruling}
+            # A person ruled that no licence applies, so nothing is claimed and
+            # nothing is resolved: the decision must not fall back to the source's
+            # own field after a human has contradicted it.
+            return {'human_ruling': ruling, 'license_claim': None, 'resolved_license_id': None}
 
         attestation = Evidence(
             kind=EvidenceKind.HUMAN_ATTESTATION,
@@ -46,7 +49,14 @@ class ReviewNode:
 
         grant = self._matrix.resolve(ruling.license_id)
         if grant is None:
-            return {'human_ruling': ruling, 'evidence': evidence}
+            # The ruling names a licence the policy table does not know, so the
+            # identity does not resolve. It still becomes the claim, so the refusal
+            # names what the person ruled instead of reporting no licence at all.
+            return {
+                'human_ruling': ruling,
+                'license_claim': ruling.license_id,
+                'evidence': evidence,
+            }
 
         identity_match = Evidence(
             kind=EvidenceKind.SPDX_MATCH,
@@ -57,6 +67,7 @@ class ReviewNode:
         )
         return {
             'human_ruling': ruling,
+            'license_claim': ruling.license_id,
             'resolved_license_id': grant.license_id,
             'evidence': [*evidence, identity_match],
         }

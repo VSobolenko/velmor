@@ -26,6 +26,7 @@ class TestResolveLicenseNode:
         result = await node(state)
 
         assert result['resolved_license_id'] == 'CC0-1.0'
+        assert result['license_claim'] == 'CC0-1.0'
         evidence = result['evidence']
         assert [item.kind for item in evidence] == [EvidenceKind.SPDX_MATCH]
         assert evidence[0].excerpt == 'CC0-1.0'
@@ -44,6 +45,7 @@ class TestResolveLicenseNode:
         result = await node(state)
 
         assert result['resolved_license_id'] == 'MIT'
+        assert result['license_claim'] == 'MIT'
 
     async def test_a_human_ruling_outranks_a_model_reading(
         self, clock: FixedClock, matrix: LicenseMatrix
@@ -59,6 +61,7 @@ class TestResolveLicenseNode:
         result = await node(state)
 
         assert result['resolved_license_id'] == 'Apache-2.0'
+        assert result['license_claim'] == 'Apache-2.0'
 
     async def test_a_rejected_ruling_resolves_nothing(
         self, clock: FixedClock, matrix: LicenseMatrix
@@ -72,7 +75,7 @@ class TestResolveLicenseNode:
 
         result = await node(state)
 
-        assert result == {'resolved_license_id': None}
+        assert result == {'license_claim': None, 'resolved_license_id': None}
 
     async def test_an_unrecognised_claim_resolves_to_nothing_and_matches_no_identity(
         self, clock: FixedClock, matrix: LicenseMatrix
@@ -85,7 +88,12 @@ class TestResolveLicenseNode:
 
         result = await node(state)
 
-        assert result == {'resolved_license_id': None}
+        # The unresolvable claim is still carried, so the refusal can name what was
+        # claimed instead of reporting that nothing was declared.
+        assert result == {
+            'license_claim': 'Free for personal use only, ask the author',
+            'resolved_license_id': None,
+        }
 
     async def test_earlier_evidence_is_kept_and_the_identity_match_is_appended(
         self, clock: FixedClock, matrix: LicenseMatrix
@@ -117,4 +125,4 @@ class TestResolveLicenseNode:
 
         result = await node(state)
 
-        assert set(result) == {'resolved_license_id', 'evidence'}
+        assert set(result) == {'license_claim', 'resolved_license_id', 'evidence'}

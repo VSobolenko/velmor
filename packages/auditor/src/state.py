@@ -18,11 +18,20 @@ class AuditorState(TypedDict):
     safe to re-run, which matters because LangGraph restarts an interrupted node
     from the top when it resumes - a node appending to a shared list would
     double-count.
+
+    ``license_claim`` and ``resolved_license_id`` are the two facts about the
+    license identity, kept apart on purpose: the first is the claim the run
+    settled on - a human ruling, a model reading or the source's own field - and
+    the second is that claim mapped onto the policy table, or ``None`` when it
+    maps to nothing. The router reads the resolution to decide where to go next,
+    and the decision reads the claim so it can name it in the record even when it
+    resolved to nothing.
     """
 
     candidate: Candidate
     source: SourceSpec
     evidence: list[Evidence]
+    license_claim: str | None
     resolved_license_id: str | None
     interpretation: LicenseInterpretation | None
     investigation_attempts: int

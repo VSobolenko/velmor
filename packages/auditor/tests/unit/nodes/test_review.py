@@ -64,6 +64,7 @@ class TestReviewNode:
             EvidenceKind.SPDX_MATCH,
         ]
         assert resumed['resolved_license_id'] == 'MIT'
+        assert resumed['license_claim'] == 'MIT'
         assert resumed['human_ruling'].approved is True
 
     async def test_a_rejected_ruling_records_no_licence(
@@ -79,6 +80,7 @@ class TestReviewNode:
 
         assert resumed['human_ruling'].approved is False
         assert resumed['evidence'] == []
+        assert resumed['license_claim'] is None
         assert resumed['resolved_license_id'] is None
 
     async def test_an_approved_ruling_for_an_unknown_licence_resolves_nothing(
@@ -102,6 +104,7 @@ class TestReviewNode:
             EvidenceKind.HUMAN_ATTESTATION,
         ]
         assert resumed['resolved_license_id'] is None
+        assert resumed['license_claim'] == 'Velmor-Internal-Ware'
 
     async def test_an_approval_cannot_widen_what_a_licence_permits(
         self, matrix: LicenseMatrix, clock: FixedClock, engine: RightsEngine
@@ -121,9 +124,12 @@ class TestReviewNode:
         )
 
         assert resumed['resolved_license_id'] == 'CC-BY-NC-4.0'
+        assert resumed['license_claim'] == 'CC-BY-NC-4.0'
 
         decide = DecideNode(engine.resolver, engine.gate, clock, RightsEngine.STOREFRONT_ACTIONS)
         ruled = await decide(resumed)
 
         assert ruled['decision'].publishable is False
         assert ruled['decision'].reasons
+        # The ruling is the licence the decision rests on, so the refusal names it.
+        assert 'CC-BY-NC-4.0' in ' '.join(ruled['decision'].reasons)

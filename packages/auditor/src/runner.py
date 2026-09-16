@@ -139,6 +139,7 @@ class AuditorRunner:
             'candidate': candidate,
             'source': spec,
             'evidence': [],
+            'license_claim': None,
             'resolved_license_id': None,
             'interpretation': None,
             'investigation_attempts': 0,

@@ -14,9 +14,14 @@ policy. This skill is the map of the code.
 
 ## The decision in one line
 
-`Candidate` + `Evidence` -> `RightsResolver.resolve()` -> `RightsRecord` ->
-`PublicationGate.decide()` -> `GateDecision`. Nothing reaches the storefront
-without `publishable=True`.
+`Candidate` + licence claim + `Evidence` -> `RightsResolver.resolve()` ->
+`RightsRecord` -> `PublicationGate.decide()` -> `GateDecision`. Nothing reaches the
+storefront without `publishable=True`.
+
+The claim is an explicit argument to `resolve`, not a field read off the
+candidate: the caller that accumulated the evidence settles *which* licence
+applies, and the resolver answers only whether that licence grants the requested
+actions.
 
 ## The modules
 
@@ -27,7 +32,7 @@ without `publishable=True`.
 | `packages/services/src/domain/gate.py` | `GateDecision` |
 | `packages/services/src/rights/license_grants.py` | `DefaultLicenseGrants.TABLE` - the policy table |
 | `packages/services/src/rights/license_matrix.py` | `LicenseMatrix` - messy license string -> canonical grant, or `None` |
-| `packages/services/src/rights/rights_resolver.py` | `RightsResolver` - does the license grant the requested actions |
+| `packages/services/src/rights/rights_resolver.py` | `RightsResolver` - does the claimed license grant the requested actions |
 | `packages/services/src/rights/publication_gate.py` | `PublicationGate` - the only door to the storefront |
 | `packages/services/src/rights/engine.py` | `RightsEngine` - composition of the three above, wired in `Container` |
 | `packages/services/src/screening/prohibited_screen.py` | `ProhibitedCategoryScreen` - refuses, never rewords |
@@ -77,10 +82,10 @@ evidence, so without that check a hesitant guess would satisfy the gate.
 
 ## Engine versioning
 
-`RightsResolver.ENGINE_VERSION` (`'1.1.0'`) is stamped into every `RightsRecord`.
+`RightsResolver.ENGINE_VERSION` (`'1.2.0'`) is stamped into every `RightsRecord`.
 Bump it in the same change whenever a verdict could change for identical inputs -
-a policy or alias change, a new gate condition. A silent policy change is an
-unauditable one.
+a policy or alias change, a new gate condition, a change to which licence claim the
+decision rests on. A silent policy change is an unauditable one.
 
 ## Invariants a change must not break
 
@@ -88,9 +93,10 @@ unauditable one.
    `LicenseMatrix.resolve`, which becomes `UNKNOWN`, which is not publishable.
 2. No fuzzy matching. If a string does not resolve to a canonical entry, it does
    not resolve. Never widen `LicenseMatrix.ALIASES` to make one item pass.
-3. The verdict is a pure function of `(Candidate, LicenseGrant, evidence)`. No
+3. The verdict is a pure function of `(Candidate, licence claim, evidence)`. No
    model, clock, randomness, network or filesystem read may influence it. Time is
-   passed in by the caller (`decided_at`).
+   passed in by the caller (`decided_at`), and the licence claim is passed in too,
+   so a decision always names the licence it was made on.
 4. A model may contribute an `Evidence` record and nothing else. It never returns
    a verdict, and its record is never source evidence: an `SPDX_MATCH` derived from
    a model reading cannot by itself satisfy the gate. The `SOURCE_EVIDENCE_KINDS`
