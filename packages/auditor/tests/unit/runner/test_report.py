@@ -7,9 +7,11 @@ from packages.auditor.src.graph import AuditorGraph
 from packages.auditor.src.runner import AuditorRunner
 from packages.auditor.tests.conftest import (
     ESCALATION_CONFIDENCE,
+    FailingPageFetcher,
     FakeInterpreter,
     FakePageFetcher,
     FixedClock,
+    gone_error,
 )
 from packages.services.src.domain.verification_run import VerificationOutcome
 from packages.services.src.persistence.memory import InMemoryStore
@@ -19,6 +21,8 @@ from packages.services.src.sources.source_registry import SourceRegistry
 from packages.services.tests.conftest import build_candidate
 
 BATCH_SIZE = 10
+
+GONE = gone_error('https://openverse.test/items/openverse:1')
 
 
 def build_runner(
@@ -173,11 +177,15 @@ class TestVerificationRunReport:
         assert await store.pending_audit(10) == (candidate,)
 
     @staticmethod
-    def build_pausing_graph(engine: RightsEngine, clock: FixedClock) -> CompiledStateGraph:
+    def build_pausing_graph(
+        engine: RightsEngine,
+        clock: FixedClock,
+        fetcher: FakePageFetcher | FailingPageFetcher | None = None,
+    ) -> CompiledStateGraph:
         """The real graph with a checkpointer, so an unresolved licence can pause."""
         return AuditorGraph(
             engine=engine,
-            fetcher=FakePageFetcher(),
+            fetcher=FakePageFetcher() if fetcher is None else fetcher,
             interpreter=FakeInterpreter(),
             clock=clock,
             model_name='test-model',
@@ -186,3 +194,17 @@ class TestVerificationRunReport:
             requested_actions=RightsEngine.STOREFRONT_ACTIONS,
             checkpointer=InMemorySaver(),
         ).build()
+
+    async def test_a_dead_page_is_reported_with_the_reason_it_paused(
+        self, engine: RightsEngine, clock: FixedClock, registry: SourceRegistry
+    ) -> None:
+        store = InMemoryStore()
+        await store.upsert_many((build_candidate(license_id=None),))
+        graph = self.build_pausing_graph(engine, clock, FailingPageFetcher(GONE))
+
+        run = await build_runner(graph, registry, store).run_once()
+
+        paused = run.outcomes[0]
+        assert paused.outcome is VerificationOutcome.PAUSED
+        assert paused.reasons[0] == AuditorRunner.PAUSED_REASON
+        assert any('fetch failed' in reason for reason in paused.reasons)

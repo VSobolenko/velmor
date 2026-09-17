@@ -71,16 +71,21 @@ class AuditorRunner:
             refusals_by_category=self._refusal_counts(screenings),
         )
 
-    async def verify(self, candidate: Candidate) -> GateDecision | None:
+    async def verify(self, candidate: Candidate) -> tuple[GateDecision | None, tuple[str, ...]]:
         spec = self._registry.by_id(candidate.source_id)
         result = await self._graph.ainvoke(
             self._initial_state(candidate, spec),
             config={'configurable': {'thread_id': candidate.id}},
         )
         # A paused run has produced no verdict yet. That is neither a failure nor
-        # a rejection, so it is reported as absent rather than as a decision.
+        # a rejection, so it is reported as absent rather than as a decision. The
+        # reasons it paused travel out with it, so the report names them instead
+        # of a bare "awaiting review".
+        failures = tuple(result['investigation_failures'])
         decision = result.get('decision')
-        return decision if isinstance(decision, GateDecision) else None
+        if isinstance(decision, GateDecision):
+            return decision, failures
+        return None, failures
 
     async def _outcome_for(
         self, candidate: Candidate, screening: ScreeningResult
@@ -90,12 +95,12 @@ class AuditorRunner:
         return await self._ruled(candidate)
 
     async def _ruled(self, candidate: Candidate) -> CandidateOutcome:
-        decision = await self.verify(candidate)
+        decision, investigation_failures = await self.verify(candidate)
         if decision is None:
             return CandidateOutcome(
                 candidate_id=candidate.id,
                 outcome=VerificationOutcome.PAUSED,
-                reasons=(self.PAUSED_REASON,),
+                reasons=(self.PAUSED_REASON, *investigation_failures),
                 decision=None,
             )
 
@@ -143,6 +148,7 @@ class AuditorRunner:
             'resolved_license_id': None,
             'interpretation': None,
             'investigation_attempts': 0,
+            'investigation_failures': [],
             'human_ruling': None,
             'record': None,
             'decision': None,

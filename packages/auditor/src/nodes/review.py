@@ -82,5 +82,6 @@ class ReviewNode:
             'declared_license_id': candidate.declared_license_id,
             'interpretation': (interpretation.model_dump() if interpretation is not None else None),
             'investigation_attempts': state['investigation_attempts'],
+            'investigation_failures': state['investigation_failures'],
             'question': 'Which licence applies to this item, if any?',
         }

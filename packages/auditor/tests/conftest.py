@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
+import httpx
 import pytest
 from langgraph.graph.state import CompiledStateGraph
 
@@ -58,6 +59,28 @@ class FakePageFetcher:
         return self._text
 
 
+class FailingPageFetcher:
+    """Stands in for a landing page that is gone: the fetch raises, as httpx does."""
+
+    def __init__(self, error: httpx.HTTPError) -> None:
+        self._error = error
+        self.fetched: list[str] = []
+
+    async def fetch_text(self, url: str) -> str:
+        self.fetched.append(url)
+        raise self._error
+
+
+def gone_error(url: str) -> httpx.HTTPStatusError:
+    """The error httpx raises when a landing page no longer exists."""
+    request = httpx.Request('GET', url)
+    return httpx.HTTPStatusError(
+        'Client error 404 Not Found',
+        request=request,
+        response=httpx.Response(404, request=request),
+    )
+
+
 class FakeInterpreter:
     """Stands in for the model: returns a fixed reading and counts its calls."""
 
@@ -94,6 +117,7 @@ def build_state(
     resolved_license_id: str | None = None,
     interpretation: LicenseInterpretation | None = None,
     investigation_attempts: int = 0,
+    investigation_failures: tuple[str, ...] = (),
     human_ruling: HumanRuling | None = None,
 ) -> AuditorState:
     return {
@@ -104,6 +128,7 @@ def build_state(
         'resolved_license_id': resolved_license_id,
         'interpretation': interpretation,
         'investigation_attempts': investigation_attempts,
+        'investigation_failures': list(investigation_failures),
         'human_ruling': human_ruling,
         'record': None,
         'decision': None,

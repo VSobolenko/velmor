@@ -4,6 +4,7 @@ from contextlib import AsyncExitStack
 
 import httpx
 from langgraph.checkpoint.base import BaseCheckpointSaver
+from sqlalchemy.engine import make_url
 from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker, create_async_engine
 
 from packages.core.src.bootstrap.observability import Observability
@@ -101,11 +102,22 @@ class Container:
         from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 
         saver = await self._stack.enter_async_context(
-            AsyncPostgresSaver.from_conn_string(self.settings.database_dsn)
+            AsyncPostgresSaver.from_conn_string(self._checkpoint_dsn())
         )
         await saver.setup()
         self._checkpointer = saver
         return saver
+
+    def _checkpoint_dsn(self) -> str:
+        """Address the checkpoint store in libpq form.
+
+        The store is reached through SQLAlchemy, which needs the driver suffix
+        in ``postgresql+asyncpg://``; the saver parses the same string with
+        libpq and rejects that suffix. Both point at one database, so the DSN is
+        derived here rather than duplicated in the environment.
+        """
+        url = make_url(self.settings.database_dsn)
+        return url.set(drivername='postgresql').render_as_string(hide_password=False)
 
     def _require_store(self) -> PostgresStore:
         if self._store is None:

@@ -2,10 +2,12 @@ from __future__ import annotations
 
 from packages.auditor.src.nodes.investigate import InvestigateNode
 from packages.auditor.tests.conftest import (
+    FailingPageFetcher,
     FakeInterpreter,
     FakePageFetcher,
     FixedClock,
     build_state,
+    gone_error,
 )
 from packages.services.src.domain.interpretation import LicenseInterpretation
 from packages.services.src.domain.rights import EvidenceKind
@@ -20,6 +22,8 @@ INTERPRETED = LicenseInterpretation(
     reasoning='the page states a Creative Commons attribution licence',
 )
 
+GONE = gone_error('https://openverse.test/items/openverse:1')
+
 
 class InvestigateCase:
     """The node under test, wired to a fetcher and an interpreter that record calls."""
@@ -31,6 +35,11 @@ class InvestigateCase:
         interpreter = FakeInterpreter(interpretation)
         node = InvestigateNode(fetcher, interpreter, clock, model_name='test-model')
         return node, fetcher
+
+    def build_failing_node(self, clock: FixedClock) -> InvestigateNode:
+        return InvestigateNode(
+            FailingPageFetcher(GONE), FakeInterpreter(INTERPRETED), clock, model_name='test-model'
+        )
 
 
 class TestInvestigateNode(InvestigateCase):
@@ -170,3 +179,50 @@ class TestInvestigateNodeQuoteVerification(InvestigateCase):
         quote = result['evidence'][0]
         assert quote.kind is EvidenceKind.LICENSE_FILE
         assert quote.excerpt == PAGE_TEXT
+
+
+class TestInvestigateNodeDeadPage(InvestigateCase):
+    """A landing page that is gone spends the attempt and states the reason.
+
+    Openverse stores URLs that outlive the item, so a third party answering 404 is
+    a routine outcome, not a fault of this run. The attempt is spent and the reason
+    carried, so the candidate reaches the human with an explanation instead of
+    aborting the batch.
+    """
+
+    async def test_a_dead_page_spends_the_attempt_and_records_the_reason(
+        self, clock: FixedClock
+    ) -> None:
+        node = self.build_failing_node(clock)
+        state = build_state(build_candidate(license_id=None), build_spec())
+
+        result = await node(state)
+
+        assert result['investigation_attempts'] == 1
+        assert result['investigation_failures'] == [
+            f'fetch failed for {state["candidate"].landing_url}: {GONE}'
+        ]
+        assert 'interpretation' not in result
+
+    async def test_the_model_is_not_called_when_the_page_is_gone(
+        self, clock: FixedClock
+    ) -> None:
+        interpreter = FakeInterpreter(INTERPRETED)
+        node = InvestigateNode(
+            FailingPageFetcher(GONE), interpreter, clock, model_name='test-model'
+        )
+        state = build_state(build_candidate(license_id=None), build_spec())
+
+        await node(state)
+
+        assert interpreter.calls == []
+
+    async def test_failures_accumulate_over_attempts(self, clock: FixedClock) -> None:
+        node = self.build_failing_node(clock)
+        state = build_state(build_candidate(license_id=None), build_spec())
+
+        first = await node(state)
+        second = await node({**state, **first})
+
+        assert second['investigation_attempts'] == 2
+        assert len(second['investigation_failures']) == 2

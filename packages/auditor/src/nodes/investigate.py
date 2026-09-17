@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import httpx
+
 from packages.auditor.src.state import AuditorState
 from packages.services.src.clock import Clock
 from packages.services.src.domain.rights import Evidence, EvidenceKind
@@ -39,7 +41,23 @@ class InvestigateNode:
 
     async def __call__(self, state: AuditorState) -> dict:
         candidate = state['candidate']
-        page_text = await self._fetcher.fetch_text(candidate.landing_url)
+        try:
+            page_text = await self._fetcher.fetch_text(candidate.landing_url)
+        except httpx.HTTPError as error:
+            # httpx reports both a 4xx/5xx answer (HTTPStatusError, raised by
+            # raise_for_status) and a transport failure (RequestError) as
+            # HTTPError subclasses. A landing page whose target has been deleted
+            # is a routine answer from a third party - Openverse stores URLs that
+            # outlive the item - so the attempt is spent and the reason carried
+            # in the state, rather than aborting the batch on one dead link.
+            return {
+                'investigation_attempts': state['investigation_attempts'] + 1,
+                'investigation_failures': [
+                    *state['investigation_failures'],
+                    f'fetch failed for {candidate.landing_url}: {error}',
+                ],
+            }
+
         interpretation = await self._interpreter.interpret(page_text, candidate.title)
 
         now = self._clock.now()

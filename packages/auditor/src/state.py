@@ -35,6 +35,10 @@ class AuditorState(TypedDict):
     resolved_license_id: str | None
     interpretation: LicenseInterpretation | None
     investigation_attempts: int
+    # Why an investigation produced no reading: the landing page is gone, or the
+    # fetch failed. Carried so the person who reviews the candidate sees a reason
+    # instead of an unexplained pause.
+    investigation_failures: list[str]
     human_ruling: HumanRuling | None
     record: RightsRecord | None
     decision: GateDecision | None
