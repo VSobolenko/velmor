@@ -44,14 +44,24 @@ class EnvFileResolver:
         Agent.AUDITOR: PROJECT_ROOT / 'packages' / 'auditor',
     }
 
+    API_ROOT: Path = PROJECT_ROOT / 'packages' / 'api'
+
     @classmethod
     def resolve(cls, agent: Agent, environment: Environment) -> Path:
-        package_root = cls.ROOTS[agent]
-        env_file = package_root / f'.env.{environment.value}'
+        return cls._profile_file(cls.ROOTS[agent], environment)
+
+    @classmethod
+    def resolve_api(cls, environment: Environment) -> Path:
+        """The storefront is not an agent, so it has its own profile root."""
+        return cls._profile_file(cls.API_ROOT, environment)
+
+    @classmethod
+    def _profile_file(cls, root: Path, environment: Environment) -> Path:
+        env_file = root / f'.env.{environment.value}'
         if not env_file.exists():
             raise FileNotFoundError(
                 f'Environment file not found: {env_file}. '
-                f'Copy .env.example to .env.{environment.value} in {package_root}'
+                f'Copy .env.example to .env.{environment.value} in {root}'
             )
         return env_file
 
@@ -122,6 +132,31 @@ def sources(
     try:
         SourceListing().show(environment)
     except (VelmorError, FileNotFoundError) as error:
+        typer.secho(f'error: {error}', fg=typer.colors.RED, err=True)
+        raise typer.Exit(code=1) from error
+
+
+@app.command('serve')
+def serve(
+    environment: Annotated[
+        Environment,
+        typer.Option('--env', '-e', help='Deployment profile to load'),
+    ] = Environment.DEV,
+    host: Annotated[
+        str,
+        typer.Option('--host', help='Interface to bind (127.0.0.1 unless exposed on purpose)'),
+    ] = '127.0.0.1',
+    port: Annotated[int, typer.Option('--port', help='Port to bind')] = 8080,
+) -> None:
+    """Serve the storefront over HTTP."""
+    # Imported here for the same reason the agent modules are: it pulls in the ASGI
+    # stack, which `--help` and `sources` should not pay for.
+    from velmor.api_server import ApiServer
+
+    try:
+        loader = SettingsLoader(EnvFileResolver.resolve_api(environment))
+        ApiServer(loader).run(host, port)
+    except (VelmorError, FileNotFoundError, ValueError) as error:
         typer.secho(f'error: {error}', fg=typer.colors.RED, err=True)
         raise typer.Exit(code=1) from error
 

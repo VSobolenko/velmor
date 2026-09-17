@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from packages.services.src.domain.candidate import Candidate
 from packages.services.src.domain.gate import GateDecision
+from packages.services.src.domain.rights import RightsRecord
 
 
 class InMemoryStore:
@@ -41,6 +42,20 @@ class InMemoryStore:
 
     async def save(self, decision: GateDecision) -> None:
         self._decisions[decision.candidate_id] = decision
+
+    async def published(self, limit: int) -> tuple[tuple[Candidate, RightsRecord], ...]:
+        return tuple(
+            (self._candidates[candidate_id], decision.record)
+            for candidate_id, decision in self._decisions.items()
+            if decision.publishable and candidate_id in self._candidates
+        )[:limit]
+
+    async def published_count(self) -> int:
+        return sum(
+            1
+            for candidate_id, decision in self._decisions.items()
+            if decision.publishable and candidate_id in self._candidates
+        )
 
     def stored_ids(self) -> tuple[str, ...]:
         return tuple(self._candidates)

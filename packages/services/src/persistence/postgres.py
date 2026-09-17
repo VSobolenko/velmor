@@ -1,11 +1,12 @@
 from __future__ import annotations
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
 from packages.services.src.domain.candidate import Candidate
 from packages.services.src.domain.gate import GateDecision
+from packages.services.src.domain.rights import RightsRecord
 from packages.services.src.persistence.schema import Schema
 
 
@@ -69,6 +70,44 @@ class PostgresStore:
         async with self._session_factory() as session:
             rows = (await session.execute(statement)).mappings().all()
         return tuple(self._candidate_from(row) for row in rows)
+
+    async def published(self, limit: int) -> tuple[tuple[Candidate, RightsRecord], ...]:
+        """Publishable goods, most recently decided first.
+
+        ``publishable`` is the gate's own column, so the storefront reads the
+        verdict rather than re-deriving it. Only the record JSONB is selected
+        beside the candidate: its scalar columns are duplicated in the record and
+        an unlabelled join would collide on ``source_id``.
+        """
+        statement = (
+            select(Schema.candidates, Schema.rights_records.c.record)
+            .join(
+                Schema.rights_records,
+                Schema.rights_records.c.candidate_id == Schema.candidates.c.id,
+            )
+            .where(Schema.rights_records.c.publishable.is_(True))
+            .order_by(Schema.rights_records.c.decided_at.desc(), Schema.candidates.c.id)
+            .limit(limit)
+        )
+        async with self._session_factory() as session:
+            rows = (await session.execute(statement)).mappings().all()
+        return tuple(
+            (self._candidate_from(row), RightsRecord.model_validate(row['record']))
+            for row in rows
+        )
+
+    async def published_count(self) -> int:
+        statement = (
+            select(func.count())
+            .select_from(Schema.candidates)
+            .join(
+                Schema.rights_records,
+                Schema.rights_records.c.candidate_id == Schema.candidates.c.id,
+            )
+            .where(Schema.rights_records.c.publishable.is_(True))
+        )
+        async with self._session_factory() as session:
+            return (await session.execute(statement)).scalar_one()
 
     async def save(self, decision: GateDecision) -> None:
         statement = (
