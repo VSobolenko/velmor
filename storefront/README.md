@@ -24,6 +24,11 @@ Open http://localhost:3000. The API must be reachable at
 Both are public client values, not secrets. Do not put Stripe, bePaid, Saleor, or
 operator keys in this app.
 
+Buyer identity for cart persistence and account routes is `NEXT_PUBLIC_BUYER_ID`
+sent as `X-Buyer-Id`. There is no Saleor customer session yet; real authentication
+lands in a later change. The local cart key is `velmor.cart.{buyerId}` so demo
+buyers do not share lines.
+
 ## Scripts
 
 - `npm run dev` — local development

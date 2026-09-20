@@ -1,15 +1,11 @@
 import Link from "next/link";
+import { ShopChrome } from "@/components/ShopChrome";
 import styles from "./shop.module.css";
 
 export default function NotFound() {
   return (
     <div className={styles.page}>
-      <header className={styles.header}>
-        <p className={styles.brand}>
-          <Link href="/">Proofbasket</Link>
-        </p>
-        <p className={styles.tagline}>Not found</p>
-      </header>
+      <ShopChrome tagline="Not found" />
       <main className={styles.main}>
         <h1 className={styles.heading}>Not found</h1>
         <p className={styles.empty}>

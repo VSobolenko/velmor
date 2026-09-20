@@ -112,9 +112,32 @@ export class CommerceApiClient {
     );
   }
 
-  /** Absolute URL for browser navigation to a download grant. */
+  /** Absolute URL for the download grant endpoint (needs X-Buyer-Id). */
   downloadUrl(token: string): string {
     return `${this.baseUrl}/downloads/${encodeURIComponent(token)}`;
+  }
+
+  /**
+   * Fetch granted bytes with the buyer header and trigger a browser save.
+   * A bare navigation to {@link downloadUrl} cannot send X-Buyer-Id.
+   */
+  async saveDownload(token: string, filename: string): Promise<void> {
+    const response = await fetch(this.downloadUrl(token), {
+      method: "GET",
+      headers: { [BUYER_HEADER]: this.buyerId },
+      cache: "no-store",
+    });
+    if (!response.ok) {
+      const detail = await this.readErrorDetail(response);
+      throw new CommerceApiError(response.status, detail);
+    }
+    const blob = await response.blob();
+    const objectUrl = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = objectUrl;
+    anchor.download = filename;
+    anchor.click();
+    URL.revokeObjectURL(objectUrl);
   }
 
   private async requestJson<T>(

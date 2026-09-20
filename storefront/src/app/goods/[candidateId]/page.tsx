@@ -1,6 +1,6 @@
-import Link from "next/link";
 import { notFound } from "next/navigation";
 import { AddToCartButton } from "@/components/AddToCartButton";
+import { ShopChrome } from "@/components/ShopChrome";
 import { CommerceApiClient, CommerceApiError } from "@/lib/api";
 import styles from "../../shop.module.css";
 
@@ -28,19 +28,7 @@ export default async function GoodPage({ params }: Props) {
 
   return (
     <div className={styles.page}>
-      <header className={styles.header}>
-        <p className={styles.brand}>
-          <Link href="/">Proofbasket</Link>
-        </p>
-        <p className={styles.tagline}>Product</p>
-        <nav className={styles.nav}>
-          <Link href="/">Home</Link>
-          {good.category_slug !== null ? (
-            <Link href={`/categories/${good.category_slug}`}>Category</Link>
-          ) : null}
-          <Link href="/cart">Cart</Link>
-        </nav>
-      </header>
+      <ShopChrome tagline="Product" />
       <main className={styles.main}>
         <h1 className={styles.heading}>{good.title}</h1>
         <p className={styles.meta}>

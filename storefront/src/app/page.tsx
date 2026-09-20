@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { ShopChrome } from "@/components/ShopChrome";
 import {
   CommerceApiClient,
   CommerceApiError,
@@ -49,15 +50,7 @@ export default async function Home() {
 
   return (
     <div className={styles.page}>
-      <header className={styles.header}>
-        <p className={styles.brand}>
-          <Link href="/">Proofbasket</Link>
-        </p>
-        <p className={styles.tagline}>Goods that passed the Velmor rights gate</p>
-        <nav className={styles.nav}>
-          <Link href="/cart">Cart</Link>
-        </nav>
-      </header>
+      <ShopChrome tagline="Goods that passed the Velmor rights gate" />
       <main className={styles.main}>
         {data.kind === "error" ? (
           <p className={styles.error}>{data.message}</p>

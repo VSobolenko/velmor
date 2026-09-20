@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import { ShopChrome } from "@/components/ShopChrome";
 import { CommerceApiClient, CommerceApiError } from "@/lib/api";
 import styles from "../../shop.module.css";
 
@@ -24,16 +25,7 @@ export default async function CategoryPage({ params }: Props) {
 
   return (
     <div className={styles.page}>
-      <header className={styles.header}>
-        <p className={styles.brand}>
-          <Link href="/">Proofbasket</Link>
-        </p>
-        <p className={styles.tagline}>{category.name}</p>
-        <nav className={styles.nav}>
-          <Link href="/">Home</Link>
-          <Link href="/cart">Cart</Link>
-        </nav>
-      </header>
+      <ShopChrome tagline={category.name} />
       <main className={styles.main}>
         <h1 className={styles.heading}>{category.name}</h1>
         {category.goods.length === 0 ? (

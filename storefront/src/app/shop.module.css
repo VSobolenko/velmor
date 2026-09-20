@@ -139,13 +139,70 @@
   font: inherit;
   font-size: 0.95rem;
   cursor: pointer;
+  text-decoration: none;
+  display: inline-block;
 }
 
 .button:hover {
   background: #2a3038;
 }
 
+.button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.button:disabled:hover {
+  background: #14161a;
+}
+
 .linkButton {
+  appearance: none;
+  border: none;
+  background: none;
+  padding: 0;
   color: #1a5fb4;
+  font: inherit;
   font-size: 0.95rem;
+  cursor: pointer;
+}
+
+.linkButton:hover {
+  text-decoration: underline;
+}
+
+.cartLine {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  padding-bottom: 0.75rem;
+  border-bottom: 1px solid #e4e6ea;
+}
+
+.cartControls {
+  display: flex;
+  gap: 1rem;
+  align-items: center;
+}
+
+.qtyLabel {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+  font-size: 0.9rem;
+  color: #626a76;
+}
+
+.qtyInput {
+  width: 4rem;
+  padding: 0.25rem 0.35rem;
+  font: inherit;
+  border: 1px solid #c5c9d0;
+}
+
+.downloadControl {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  align-items: flex-start;
 }
