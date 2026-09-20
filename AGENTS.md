@@ -63,9 +63,9 @@ scripts/setup-mcp.mjs       verify MCP servers resolve
 | Structured extraction | Pydantic AI (one extraction at a time) |
 | Long-horizon research | DeepAgents (not used yet) |
 | Tracing | Logfire + OpenInference instrumentors; Langfuse for LLM observability |
-| Storefront | Saleor (planned) |
-| Payments | Stripe (planned) |
-| API | FastAPI + uvicorn (planned) |
+| Storefront | Saleor GraphQL + Next.js Proofbasket UI (demo/test) |
+| Payments | Stripe + bePaid + stub (dev); checkout re-verifies at payment time |
+| API | FastAPI + uvicorn (commerce HTTP surface; demo/test) |
 | CLI | typer |
 
 Python only in the product. Node exists for the agent harness and for
@@ -206,47 +206,56 @@ Implemented and tested:
   and credential contract, connectors (`contract`, `factory`, `openverse`),
   persistence (`PostgresStore`, `InMemoryStore`, schema), Pydantic AI license
   interpreter.
+- Commerce domain and persistence: catalogue entries, entitlements, orders,
+  legal disclosure; Saleor GraphQL client, publication bridge, categories,
+  content digest, delivery/grants; Stripe, bePaid, and stub (dev) payment
+  providers with payment-time re-verification of gate outcomes.
+- `packages/api`: commerce HTTP surface (catalogue, checkout, account, webhooks,
+  downloads). B2B verify is not the main surface yet.
 - `packages/scout`: deterministic ingest job and runner.
 - `packages/auditor`: graph state, node names, nodes, routing (including the
   escalation of a low-confidence reading), graph assembly, runner.
-- `velmor`: CLI, container, agent adapters, the console pass report.
+- `velmor`: CLI, container, agent adapters, the console pass report; also
+  `velmor serve`, `velmor publish`, `velmor seed-disclosure`.
+- `storefront/`: Next.js Proofbasket UI (browse, cart, account, checkout;
+  Belarusian copy). Presentation only — no rights logic, no payment secrets,
+  no privileged Saleor credentials.
+- Demo deploy: Saleor on the host; shop at
+  `https://shop.78-111-89-46.sslip.io/` (current demo host, not a product domain).
 - The vertical slice is walkable end to end: Openverse discovery -> screening ->
-  auditor graph -> gate decision -> `VerificationRun`. There is an integration-style
-  path test that walks it with a fake connector, page fetch and interpreter, so no
-  test needs a network, a model or a database.
+  auditor graph -> gate decision -> `VerificationRun` -> publish -> storefront
+  checkout (stub in DEV). There is an integration-style path test that walks the
+  rights path with a fake connector, page fetch and interpreter, so no test needs
+  a network, a model or a database.
 - Tests: rights (`license_matrix`, `publication_gate`, `rights_resolver`),
   screening, source registry, discovery, every auditor node, routing, the pass
-  report, the CLI report, and the architecture boundaries.
+  report, the CLI report, architecture boundaries, and commerce unit coverage
+  for catalogue/checkout/payments paths.
 
 Scaffolded or not yet implemented - do not assume these work:
 
-- `packages/services/src/saleor/` and `packages/services/src/payments/` are empty
-  package placeholders. Saleor and Stripe integration is on the roadmap.
-- `packages/api/src/routers/` is empty. The FastAPI surface is not built.
-- Neither `velmor scout` nor `velmor auditor` has been run against a live source
-  and a live database in this environment: the Postgres store and the checkpointer
-  are exercised by no test, and the Openverse path is unproven end to end.
+- Live Stripe / bePaid credentials and production legal-entity disclosure are not
+  done; demo and stub (DEV) paths are what is proven.
 - A candidate that pauses for review has no verdict, so the next pass selects it
   again and repeats the fetch and the model call. That cost is reported as a
   "paused" outcome rather than hidden, and delivering the human ruling is not
   built.
-- `packages/services` has no test for `PostgresStore`, `PageFetcher`, `ConnectorFactory`
-  or the Openverse connector's payload mapping.
+- PostgresStore / connector tests remain thin relative to rights tests
+  (`PageFetcher`, `ConnectorFactory`, Openverse payload mapping included).
+- B2B verify API is not the main FastAPI surface yet.
+- Category assignment is largely empty after a first publish run; curation and
+  richer catalogue UX are still open.
 - DeepAgents is a declared dependency with no use yet.
 - Type checking (`basedpyright`, `mypy`) is configured but is not a gate.
-- `storefront/` is the scoped Node exception: a Next.js presentation layer outside
-  the Python layering, with no rights logic and no payment secrets.
 
 ## Roadmap
 
-1. Saleor: publish gate-approved goods to the storefront.
-2. Stripe: payment and payout.
-3. `packages/api`: B2B verify endpoint, Saleor/Stripe webhooks, health.
-4. Human review, end to end: deliver a ruling into a resumed run instead of
+1. Live payment credentials and legal disclosure for production.
+2. Human review end to end: deliver a ruling into a resumed run instead of
    re-investigating the candidate on the next pass.
-5. Docs: vision, architecture, rights engine, source catalogue.
-6. Docker images, CI, and the remaining test coverage (`PostgresStore`, connectors,
-   the API).
+3. B2B verify endpoint.
+4. CI and remaining store / connector test coverage.
+5. Category curation and richer catalogue UX.
 
 ## AI tooling
 
