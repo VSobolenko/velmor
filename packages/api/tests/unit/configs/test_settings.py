@@ -30,6 +30,7 @@ class TestCommerceSettings:
         'BEPAID_SECRET_KEY': 'bepaid-secret-key-literal',
         'BEPAID_PUBLIC_KEY': '-----BEGIN PUBLIC KEY----- test-pem -----END PUBLIC KEY-----',
         'BEPAID_NOTIFICATION_URL': 'https://shop.example.test/webhooks/bepaid',
+        'STUB_WEBHOOK_SECRET': 'stub-webhook-secret-literal',
         'OPERATOR_REFUND_KEY': 'operator-refund-key-literal',
         'STOREFRONT_DOMAIN': 'shop.example.test',
         'DELIVERY_GRANT_SECRET': 'delivery-grant-secret-literal',
@@ -45,6 +46,7 @@ class TestCommerceSettings:
         'stripe_secret_key': 'STRIPE_SECRET_KEY',
         'stripe_webhook_signing_secret': 'STRIPE_WEBHOOK_SIGNING_SECRET',
         'bepaid_secret_key': 'BEPAID_SECRET_KEY',
+        'stub_webhook_secret': 'STUB_WEBHOOK_SECRET',
         'operator_refund_key': 'OPERATOR_REFUND_KEY',
         'delivery_grant_secret': 'DELIVERY_GRANT_SECRET',
     }

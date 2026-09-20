@@ -184,5 +184,23 @@ def publish(
         raise typer.Exit(code=1) from error
 
 
+@app.command('seed-disclosure')
+def seed_disclosure(
+    environment: Annotated[
+        Environment,
+        typer.Option('--env', '-e', help='Deployment profile to load'),
+    ] = Environment.DEV,
+) -> None:
+    """Upsert a complete fictional seller disclosure for checkout."""
+    from velmor.seed_disclosure import SeedDisclosureCommand
+
+    try:
+        loader = SettingsLoader(EnvFileResolver.resolve_api(environment))
+        SeedDisclosureCommand(loader).run()
+    except (VelmorError, FileNotFoundError, ValueError, RuntimeError) as error:
+        typer.secho(f'error: {error}', fg=typer.colors.RED, err=True)
+        raise typer.Exit(code=1) from error
+
+
 def main() -> None:
     app()

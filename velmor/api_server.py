@@ -19,6 +19,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from packages.api.src.app import ApiApplication
 from packages.api.src.configs.settings import CommerceSettings
+from packages.core.src.bootstrap.environment import Environment
 from packages.core.src.bootstrap.observability import Observability
 from packages.core.src.bootstrap.settings_loader import SettingsLoader
 from packages.services.src.commerce.asset_cache import AssetCache
@@ -26,7 +27,9 @@ from packages.services.src.commerce.checkout import CheckoutService
 from packages.services.src.commerce.delivery import DeliveryService
 from packages.services.src.commerce.grants import DeliveryGrantService
 from packages.services.src.payments.bepaid_provider import BePaidProvider
+from packages.services.src.payments.protocol import PaymentProvider
 from packages.services.src.payments.stripe_provider import StripeProvider
+from packages.services.src.payments.stub_provider import StubPaymentProvider
 from packages.services.src.persistence.postgres import PostgresStore
 
 
@@ -78,12 +81,19 @@ class ApiServer:
             http=http,
             notification_url=self._settings.bepaid_notification_url,
         )
+        providers: dict[str, PaymentProvider] = {'stripe': stripe, 'bepaid': bepaid}
+        stub: StubPaymentProvider | None = None
+        if self._settings.profile is Environment.DEV:
+            stub = StubPaymentProvider(
+                webhook_secret=self._settings.stub_webhook_secret,
+            )
+            providers[stub.provider_id] = stub
         checkout = CheckoutService(
             entries=store,
             disclosures=store,
             orders=store,
             entitlements=store,
-            providers={'stripe': stripe, 'bepaid': bepaid},
+            providers=providers,
         )
 
         @asynccontextmanager
@@ -112,5 +122,6 @@ class ApiServer:
             catalogue_unit_amount=self._settings.catalogue_unit_amount,
             catalogue_currency=self._settings.catalogue_currency,
             storefront_domain=self._settings.storefront_domain,
+            stub=stub,
             lifespan=lifespan,
         ).build()

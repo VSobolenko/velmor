@@ -29,6 +29,7 @@ class CommerceSettings(PlatformSettings):
         self.bepaid_secret_key: SecretStr = loader.required_secret('BEPAID_SECRET_KEY')
         self.bepaid_public_key: str = loader.required_str('BEPAID_PUBLIC_KEY')
         self.bepaid_notification_url: str = loader.required_str('BEPAID_NOTIFICATION_URL')
+        self.stub_webhook_secret: SecretStr = loader.required_secret('STUB_WEBHOOK_SECRET')
         self.operator_refund_key: SecretStr = loader.required_secret('OPERATOR_REFUND_KEY')
         self.storefront_domain: str = loader.required_str('STOREFRONT_DOMAIN')
         self.delivery_grant_secret: SecretStr = loader.required_secret(

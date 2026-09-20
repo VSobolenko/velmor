@@ -25,6 +25,7 @@ from packages.services.src.domain.order import OrderState
 from packages.services.src.domain.seller import SellerDisclosure, SellerDisclosureItem
 from packages.services.src.payments.bepaid_provider import BePaidProvider
 from packages.services.src.payments.stripe_provider import StripeProvider
+from packages.services.src.payments.stub_provider import StubPaymentProvider
 from packages.services.src.persistence.memory import InMemoryStore
 from packages.services.tests.conftest import build_candidate, build_record
 from packages.services.tests.unit.payments.test_stripe_provider import (
@@ -32,6 +33,12 @@ from packages.services.tests.unit.payments.test_stripe_provider import (
 )
 from packages.services.tests.unit.payments.test_stripe_provider import (
     sign_payload as stripe_sign_payload,
+)
+from packages.services.tests.unit.payments.test_stub_provider import (
+    sign_payload as stub_sign_payload,
+)
+from packages.services.tests.unit.payments.test_stub_provider import (
+    success_payload as stub_success_payload,
 )
 
 ORIGIN_URL = 'https://secret-origin.example/never-leak/asset.bin'
@@ -45,6 +52,7 @@ GRANT_SECRET = SecretStr('api-commerce-grant-secret')
 OPERATOR_KEY = SecretStr('operator-refund-key-unit-test')
 STRIPE_SECRET = SecretStr('sk_test_commerce_api_not_real')
 STRIPE_WEBHOOK = SecretStr('whsec_commerce_api_webhook_secret')
+STUB_WEBHOOK = SecretStr('stub_commerce_api_webhook_secret')
 BEPAID_SHOP = 'bepaid-shop-commerce'
 BEPAID_SECRET = SecretStr('bepaid_secret_commerce_api')
 BEPAID_NOTIFICATION = 'https://shop.example/webhooks/bepaid'
@@ -154,7 +162,7 @@ def bepaid_success_payload(*, order_id: str, amount: int = 1050) -> bytes:
 
 
 class CommerceHarness:
-    def __init__(self, tmp_path: Path) -> None:
+    def __init__(self, tmp_path: Path, *, enable_stub: bool = False) -> None:
         self.store = InMemoryStore()
         self.clock = FixedClock(NOW)
         self.stripe_calls: list[httpx.Request] = []
@@ -179,12 +187,17 @@ class CommerceHarness:
             http=self.http,
             notification_url=BEPAID_NOTIFICATION,
         )
+        providers: dict[str, object] = {'stripe': self.stripe, 'bepaid': self.bepaid}
+        self.stub: StubPaymentProvider | None = None
+        if enable_stub:
+            self.stub = StubPaymentProvider(webhook_secret=STUB_WEBHOOK)
+            providers['stub'] = self.stub
         self.checkout = CheckoutService(
             entries=self.store,
             disclosures=self.store,
             orders=self.store,
             entitlements=self.store,
-            providers={'stripe': self.stripe, 'bepaid': self.bepaid},
+            providers=providers,
         )
         grants = DeliveryGrantService(secret=GRANT_SECRET, lifetime_seconds=900)
         cache = AssetCache(root=tmp_path, max_bytes=1024)
@@ -215,6 +228,7 @@ class CommerceHarness:
                 catalogue_unit_amount=UNIT_AMOUNT,
                 catalogue_currency=CURRENCY,
                 storefront_domain='shop.example',
+                stub=self.stub,
             ).build()
         )
 
@@ -493,6 +507,109 @@ class TestBePaidWebhook:
         order = await harness.store.by_order_id(order_id)
         assert order is not None
         assert order.state is OrderState.PAID
+
+
+class TestStubWebhookAndProviders:
+    async def test_providers_omit_stub_when_not_wired(self, tmp_path: Path) -> None:
+        harness = CommerceHarness(tmp_path)
+
+        response = harness.client.get('/checkout/providers')
+
+        assert response.status_code == 200
+        assert response.json() == ['stripe', 'bepaid']
+
+    async def test_providers_include_stub_when_wired(self, tmp_path: Path) -> None:
+        harness = CommerceHarness(tmp_path, enable_stub=True)
+
+        response = harness.client.get('/checkout/providers')
+
+        assert response.status_code == 200
+        assert response.json() == ['stripe', 'bepaid', 'stub']
+
+    async def test_valid_stub_signature_marks_paid(self, tmp_path: Path) -> None:
+        harness = CommerceHarness(tmp_path, enable_stub=True)
+        await harness.store.save_disclosure(build_disclosure())
+        await harness.store.save_entry(build_entry())
+        start = harness.client.post(
+            '/checkout/start',
+            headers={BUYER_HEADER: BUYER_ID},
+            json=harness.start_body(provider_id='stub'),
+        )
+        assert start.status_code == 200
+        body = start.json()
+        order_id = body['order_id']
+        assert body['state'] == OrderState.PENDING.value
+        assert body['provider_reference'] == f'stub-{order_id}'
+        assert f'order_id={order_id}' in body['redirect_url']
+        payload = stub_success_payload(
+            order_id=order_id,
+            amount='10.50',
+            currency='USD',
+            provider_reference=body['provider_reference'],
+        )
+        signature = stub_sign_payload(payload, STUB_WEBHOOK.get_secret_value())
+
+        response = harness.client.post(
+            '/webhooks/stub',
+            content=payload,
+            headers={
+                'X-Stub-Signature': signature,
+                'Content-Type': 'application/json',
+            },
+        )
+
+        assert response.status_code == 200
+        assert response.json() == {'ok': True}
+        order = await harness.store.by_order_id(order_id)
+        assert order is not None
+        assert order.state is OrderState.PAID
+
+    async def test_bad_stub_signature_is_400(self, tmp_path: Path) -> None:
+        harness = CommerceHarness(tmp_path, enable_stub=True)
+        await harness.store.save_disclosure(build_disclosure())
+        await harness.store.save_entry(build_entry())
+        start = harness.client.post(
+            '/checkout/start',
+            headers={BUYER_HEADER: BUYER_ID},
+            json=harness.start_body(provider_id='stub'),
+        )
+        order_id = start.json()['order_id']
+        payload = stub_success_payload(
+            order_id=order_id,
+            amount='10.50',
+            currency='USD',
+        )
+
+        response = harness.client.post(
+            '/webhooks/stub',
+            content=payload,
+            headers={
+                'X-Stub-Signature': 'deadbeef',
+                'Content-Type': 'application/json',
+            },
+        )
+
+        assert response.status_code == 400
+        order = await harness.store.by_order_id(order_id)
+        assert order is not None
+        assert order.state is OrderState.PENDING
+
+    async def test_stub_route_absent_when_not_wired(self, tmp_path: Path) -> None:
+        harness = CommerceHarness(tmp_path)
+        payload = stub_success_payload()
+
+        response = harness.client.post(
+            '/webhooks/stub',
+            content=payload,
+            headers={
+                'X-Stub-Signature': stub_sign_payload(
+                    payload, STUB_WEBHOOK.get_secret_value()
+                ),
+                'Content-Type': 'application/json',
+            },
+        )
+
+        assert response.status_code == 404
 
 
 class TestAccountRoutes:

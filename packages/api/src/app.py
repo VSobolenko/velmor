@@ -44,6 +44,7 @@ from packages.services.src.payments.errors import (
     PaymentProviderError,
 )
 from packages.services.src.payments.stripe_provider import StripeProvider
+from packages.services.src.payments.stub_provider import StubPaymentProvider
 from packages.services.src.persistence.contract import (
     CandidateRepository,
     CatalogueEntryRepository,
@@ -264,13 +265,20 @@ class ApiApplication:
     OPERATOR_HEADER = 'x-operator-key'
     STRIPE_SIGNATURE_HEADER = 'stripe-signature'
     BEPAID_SIGNATURE_HEADER = 'content-signature'
+    STUB_SIGNATURE_HEADER = 'x-stub-signature'
     AUTHORIZATION_HEADER = 'authorization'
     CORS_ALLOW_METHODS = ('GET', 'POST', 'OPTIONS')
-    CORS_ALLOW_HEADERS = ('X-Buyer-Id', 'Content-Type', 'Authorization')
+    CORS_ALLOW_HEADERS = (
+        'X-Buyer-Id',
+        'Content-Type',
+        'Authorization',
+        'X-Stub-Signature',
+    )
     DEV_STOREFRONT_ORIGINS = (
         'http://localhost:3000',
         'http://127.0.0.1:3000',
     )
+    BASE_PROVIDER_IDS = ('stripe', 'bepaid')
 
     def __init__(
         self,
@@ -292,6 +300,7 @@ class ApiApplication:
         catalogue_unit_amount: Decimal,
         catalogue_currency: str,
         storefront_domain: str,
+        stub: StubPaymentProvider | None = None,
         lifespan: Lifespan | None = None,
     ) -> None:
         self._environment = environment
@@ -305,6 +314,7 @@ class ApiApplication:
         self._disclosure_check = SellerDisclosureCheck()
         self._stripe = stripe
         self._bepaid = bepaid
+        self._stub = stub
         self._orders = orders
         self._operator_refund_key = operator_refund_key
         self._entries = entries
@@ -361,9 +371,14 @@ class ApiApplication:
         app.add_api_route(
             '/checkout/disclosure', self._checkout_disclosure, methods=['GET']
         )
+        app.add_api_route(
+            '/checkout/providers', self._checkout_providers, methods=['GET']
+        )
         app.add_api_route('/checkout/start', self._checkout_start, methods=['POST'])
         app.add_api_route('/webhooks/stripe', self._stripe_webhook, methods=['POST'])
         app.add_api_route('/webhooks/bepaid', self._bepaid_webhook, methods=['POST'])
+        if self._stub is not None:
+            app.add_api_route('/webhooks/stub', self._stub_webhook, methods=['POST'])
         app.add_api_route(
             '/ops/orders/{order_id}/refund', self._operator_refund, methods=['POST']
         )
@@ -571,6 +586,17 @@ class ApiApplication:
             }
         )
 
+    async def _checkout_providers(self) -> JSONResponse:
+        """List payment providers available for this process.
+
+        ``stub`` appears only when the composition root wired
+        ``StubPaymentProvider`` (dev). Other environments never expose it.
+        """
+        providers = list(self.BASE_PROVIDER_IDS)
+        if self._stub is not None:
+            providers.append(self._stub.provider_id)
+        return JSONResponse(providers)
+
     async def _checkout_start(
         self, request: Request, body: CheckoutStartBody
     ) -> JSONResponse:
@@ -645,6 +671,25 @@ class ApiApplication:
             confirmation = self._bepaid.parse_notification(
                 payload, signature, authorization
             )
+        except PaymentNotificationError as error:
+            return JSONResponse({'detail': str(error)}, status_code=400)
+        try:
+            await self._checkout.confirm(confirmation, self._clock())
+        except CheckoutRefusedError as error:
+            return JSONResponse({'detail': str(error)}, status_code=403)
+        return JSONResponse({'ok': True})
+
+    async def _stub_webhook(self, request: Request) -> JSONResponse:
+        if self._stub is None:
+            return JSONResponse({'detail': 'stub provider is not enabled'}, status_code=404)
+        payload = await request.body()
+        signature = request.headers.get(self.STUB_SIGNATURE_HEADER, '')
+        # PaymentNotificationError is the documented auth/parse failure of
+        # StubPaymentProvider.parse_notification; CheckoutRefusedError is
+        # confirm's refusal. Mapping them to HTTP is the boundary's job
+        # (rule 03).
+        try:
+            confirmation = self._stub.parse_notification(payload, signature)
         except PaymentNotificationError as error:
             return JSONResponse({'detail': str(error)}, status_code=400)
         try:
