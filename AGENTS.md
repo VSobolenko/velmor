@@ -42,6 +42,7 @@ packages/scout/             discovery agent: find candidates (plain Python)
 packages/auditor/           verification agent: build evidence, decide (LangGraph)
 packages/api/               FastAPI surface (B2B verify, webhooks, health)
 
+storefront/                 Next.js presentation layer; the scoped Node exception.
 openspec/                   specs, active changes, config
 .cursor/                    rules, commands, hooks, mcp.json, skills
 .agents/skills/             installed skill collections (superpowers, langchain, ...)
@@ -67,7 +68,10 @@ scripts/setup-mcp.mjs       verify MCP servers resolve
 | API | FastAPI + uvicorn (planned) |
 | CLI | typer |
 
-No TypeScript and no Node in the product. Node exists for the agent harness only.
+Python only in the product. Node exists for the agent harness and for
+`storefront/`, the one deliberate exception: a presentation layer with no rights
+logic, no payment secrets and no privileged Saleor credentials, and nothing
+about publishing is decided there.
 
 ## How to run
 
@@ -230,6 +234,8 @@ Scaffolded or not yet implemented - do not assume these work:
   or the Openverse connector's payload mapping.
 - DeepAgents is a declared dependency with no use yet.
 - Type checking (`basedpyright`, `mypy`) is configured but is not a gate.
+- `storefront/` is the scoped Node exception: a Next.js presentation layer outside
+  the Python layering, with no rights logic and no payment secrets.
 
 ## Roadmap
 

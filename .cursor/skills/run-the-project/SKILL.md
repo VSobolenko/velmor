@@ -16,9 +16,12 @@ when a command fails, or before touching docker/env/CI.
 | Python | 3.13 | `requires-python = ">=3.13,<3.14"` |
 | uv | current | workspace, dependency resolution, running everything |
 | Docker | current | local Postgres + Redis |
-| Node | 18+ | only for the harness hooks (`node .cursor/hooks/*.cjs`) and `scripts/setup-mcp.mjs` |
+| Node | 18+ | only for the harness hooks (`node .cursor/hooks/*.cjs`) and `scripts/setup-mcp.mjs`; `storefront/` has its own toolchain |
 
-There is no Node/TypeScript in the product. Node exists for the agent harness only.
+Python only in the product. Node exists for the agent harness and for
+`storefront/`, the scoped Node exception: a presentation layer with no rights
+logic, no payment secrets and no privileged Saleor credentials, and nothing
+about publishing is decided there.
 
 ## First run
 
