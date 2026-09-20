@@ -146,6 +146,7 @@ class CatalogueHarness:
                 candidates=self.store,
                 catalogue_unit_amount=UNIT_AMOUNT,
                 catalogue_currency=CURRENCY,
+                storefront_domain='shop.example',
             ).build()
         )
 

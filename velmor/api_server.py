@@ -110,5 +110,6 @@ class ApiServer:
             candidates=store,
             catalogue_unit_amount=self._settings.catalogue_unit_amount,
             catalogue_currency=self._settings.catalogue_currency,
+            storefront_domain=self._settings.storefront_domain,
             lifespan=lifespan,
         ).build()

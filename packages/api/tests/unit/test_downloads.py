@@ -144,6 +144,7 @@ class DownloadHarness:
                 candidates=self.store,
                 catalogue_unit_amount=CATALOGUE_UNIT_AMOUNT,
                 catalogue_currency=CATALOGUE_CURRENCY,
+                storefront_domain='shop.example',
             ).build()
         )
 

@@ -97,6 +97,7 @@ def build_client(
         candidates=store,
         catalogue_unit_amount=_UNIT_AMOUNT,
         catalogue_currency=_CURRENCY,
+        storefront_domain='shop.example',
     ).build()
     return TestClient(app), catalog
 

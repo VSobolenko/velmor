@@ -17,6 +17,7 @@ from decimal import Decimal
 from html import escape
 
 from fastapi import FastAPI, Request
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse, Response
 from pydantic import BaseModel, SecretStr
 
@@ -261,6 +262,12 @@ class ApiApplication:
     STRIPE_SIGNATURE_HEADER = 'stripe-signature'
     BEPAID_SIGNATURE_HEADER = 'content-signature'
     AUTHORIZATION_HEADER = 'authorization'
+    CORS_ALLOW_METHODS = ('GET', 'POST', 'OPTIONS')
+    CORS_ALLOW_HEADERS = ('X-Buyer-Id', 'Content-Type', 'Authorization')
+    DEV_STOREFRONT_ORIGINS = (
+        'http://localhost:3000',
+        'http://127.0.0.1:3000',
+    )
 
     def __init__(
         self,
@@ -280,6 +287,7 @@ class ApiApplication:
         candidates: CandidateRepository,
         catalogue_unit_amount: Decimal,
         catalogue_currency: str,
+        storefront_domain: str,
         lifespan: Lifespan | None = None,
     ) -> None:
         self._environment = environment
@@ -298,6 +306,7 @@ class ApiApplication:
         self._candidates = candidates
         self._catalogue_unit_amount = catalogue_unit_amount
         self._catalogue_currency = catalogue_currency
+        self._storefront_domain = storefront_domain
         self._lifespan = lifespan
         self._page = StorefrontPage()
 
@@ -308,6 +317,13 @@ class ApiApplication:
             redoc_url=None,
             openapi_url=None,
             lifespan=self._lifespan,
+        )
+        app.add_middleware(
+            CORSMiddleware,
+            allow_origins=self._cors_origins(),
+            allow_credentials=False,
+            allow_methods=list(self.CORS_ALLOW_METHODS),
+            allow_headers=list(self.CORS_ALLOW_HEADERS),
         )
         app.add_api_route('/health', self._health, methods=['GET'])
         app.add_api_route(
@@ -343,6 +359,18 @@ class ApiApplication:
             '/ops/orders/{order_id}/refund', self._operator_refund, methods=['POST']
         )
         return app
+
+    def _cors_origins(self) -> list[str]:
+        origins = list(self._origins_from_storefront_domain())
+        if self._environment == 'dev':
+            origins.extend(self.DEV_STOREFRONT_ORIGINS)
+        return origins
+
+    def _origins_from_storefront_domain(self) -> tuple[str, ...]:
+        domain = self._storefront_domain
+        if domain.startswith('http://') or domain.startswith('https://'):
+            return (domain,)
+        return (f'https://{domain}', f'http://{domain}')
 
     async def _health(self) -> dict[str, str]:
         return {'status': 'ok', 'environment': self._environment}
