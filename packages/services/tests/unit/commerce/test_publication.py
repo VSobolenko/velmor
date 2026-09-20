@@ -4,10 +4,13 @@ from datetime import datetime, timezone
 
 import pytest
 
+from packages.services.src.commerce.category_service import CategoryService
+from packages.services.src.commerce.errors import CategoryNotFoundError
 from packages.services.src.commerce.publication import (
     PublicationBridge,
     PublicationSourceMismatchError,
 )
+from packages.services.src.commerce.slugs import ProductSlug
 from packages.services.src.domain.candidate import Candidate
 from packages.services.src.domain.catalogue import CatalogueEntry, CatalogueEntryState
 from packages.services.src.domain.gate import GateDecision
@@ -17,7 +20,7 @@ from packages.services.src.domain.rights import RightsRecord
 from packages.services.src.domain.source import SourceSpec
 from packages.services.src.persistence.memory import InMemoryStore
 from packages.services.src.rights.publication_gate import PublicationGate
-from packages.services.src.saleor.client import SaleorProduct, SaleorVariant
+from packages.services.src.saleor.client import SaleorCategory, SaleorProduct, SaleorVariant
 from packages.services.tests.conftest import build_candidate, build_record, build_spec
 
 NOW = datetime(2026, 9, 20, 12, 0, tzinfo=timezone.utc)
@@ -37,6 +40,7 @@ class FakeSaleor:
         self.calls: list[tuple[object, ...]] = []
         self._product_seq = 0
         self._variant_seq = 0
+        self._category_seq = 0
 
     async def ensure_product_type(self, name: str) -> str:
         self.calls.append(('ensure_product_type', name))
@@ -63,6 +67,20 @@ class FakeSaleor:
     async def update_variant(self, variant_id: str, sku: str) -> SaleorVariant:
         self.calls.append(('update_variant', variant_id, sku))
         return SaleorVariant(variant_id=variant_id)
+
+    async def create_category(self, name: str, slug: str) -> SaleorCategory:
+        self.calls.append(('create_category', name, slug))
+        self._category_seq += 1
+        return SaleorCategory(category_id=f'saleor-cat-{self._category_seq}')
+
+    async def update_category(
+        self, category_id: str, name: str, slug: str
+    ) -> SaleorCategory:
+        self.calls.append(('update_category', category_id, name, slug))
+        return SaleorCategory(category_id=category_id)
+
+    async def delete_category(self, category_id: str) -> None:
+        self.calls.append(('delete_category', category_id))
 
 
 def paid_record(
@@ -156,7 +174,7 @@ def store() -> InMemoryStore:
 
 @pytest.fixture
 def bridge(gate: PublicationGate, saleor: FakeSaleor, store: InMemoryStore) -> PublicationBridge:
-    return PublicationBridge(gate=gate, saleor=saleor, entries=store)
+    return PublicationBridge(gate=gate, saleor=saleor, entries=store, categories=store)
 
 
 @pytest.fixture
@@ -409,6 +427,64 @@ class TestPublicationBridge:
             }
             for call in saleor.calls
         )
+
+    async def test_update_after_assign_sends_saleor_category_id(
+        self,
+        bridge: PublicationBridge,
+        saleor: FakeSaleor,
+        store: InMemoryStore,
+        candidate: Candidate,
+        spec: SourceSpec,
+    ) -> None:
+        decision = publishable_decision()
+        published = await bridge.apply(candidate, decision, spec, NOW)
+        assert published.entry is not None
+        categories = CategoryService(categories=store, entries=store, saleor=saleor)
+        category = await categories.create(name='Photographs', slug='photographs', now=NOW)
+        assert category.category_id == 'cat-photographs'
+        assert category.saleor_category_id == 'saleor-cat-1'
+        assert category.category_id != category.saleor_category_id
+        await categories.assign(
+            candidate_id=candidate.id,
+            category_id=category.category_id,
+            product_name=candidate.title,
+        )
+        saleor.calls.clear()
+
+        outcome = await bridge.apply(candidate, decision, spec, NOW)
+
+        assert outcome.action is PublicationAction.UPDATED
+        assert outcome.entry is not None
+        assert outcome.entry.category_id == category.category_id
+        assert (
+            'update_product',
+            published.entry.saleor_product_id,
+            candidate.title,
+            ProductSlug.for_candidate(candidate.id),
+            category.saleor_category_id,
+        ) in saleor.calls
+        assert not any(
+            call[0] == 'update_product' and call[4] == category.category_id
+            for call in saleor.calls
+        )
+
+    async def test_update_with_missing_category_raises(
+        self,
+        bridge: PublicationBridge,
+        saleor: FakeSaleor,
+        store: InMemoryStore,
+        candidate: Candidate,
+        spec: SourceSpec,
+    ) -> None:
+        await store.save_entry(
+            published_entry().model_copy(update={'category_id': 'cat-missing'})
+        )
+        decision = publishable_decision()
+
+        with pytest.raises(CategoryNotFoundError):
+            await bridge.apply(candidate, decision, spec, NOW)
+
+        assert saleor.calls == []
 
 
 class TestPublicationOutcomeModel:

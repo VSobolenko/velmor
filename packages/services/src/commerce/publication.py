@@ -3,7 +3,10 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Protocol
 
-from packages.services.src.commerce.errors import PublicationSourceMismatchError
+from packages.services.src.commerce.errors import (
+    CategoryNotFoundError,
+    PublicationSourceMismatchError,
+)
 from packages.services.src.commerce.slugs import ProductSlug
 from packages.services.src.domain.candidate import Candidate
 from packages.services.src.domain.catalogue import CatalogueEntry, CatalogueEntryState
@@ -11,7 +14,10 @@ from packages.services.src.domain.gate import GateDecision
 from packages.services.src.domain.license import StorefrontListing
 from packages.services.src.domain.publication import PublicationAction, PublicationOutcome
 from packages.services.src.domain.source import SourceSpec
-from packages.services.src.persistence.contract import CatalogueEntryRepository
+from packages.services.src.persistence.contract import (
+    CatalogueEntryRepository,
+    CategoryRepository,
+)
 from packages.services.src.rights.publication_gate import PublicationGate
 from packages.services.src.saleor.client import SaleorProduct, SaleorVariant
 
@@ -49,10 +55,12 @@ class PublicationBridge:
         gate: PublicationGate,
         saleor: SaleorPublicationPort,
         entries: CatalogueEntryRepository,
+        categories: CategoryRepository,
     ) -> None:
         self._gate = gate
         self._saleor = saleor
         self._entries = entries
+        self._categories = categories
 
     async def apply(
         self,
@@ -184,11 +192,12 @@ class PublicationBridge:
     ) -> PublicationOutcome:
         slug = ProductSlug.for_candidate(candidate.id)
         sku = self._sku_for(candidate.id)
+        saleor_category_id = await self._saleor_category_id_for(existing)
         await self._saleor.update_product(
             product_id=existing.saleor_product_id,
             name=candidate.title,
             slug=slug,
-            category_id=existing.category_id,
+            category_id=saleor_category_id,
         )
         await self._saleor.update_variant(variant_id=existing.saleor_variant_id, sku=sku)
         entry = CatalogueEntry(
@@ -220,11 +229,12 @@ class PublicationBridge:
     ) -> PublicationOutcome:
         slug = ProductSlug.for_candidate(candidate.id)
         sku = self._sku_for(candidate.id)
+        saleor_category_id = await self._saleor_category_id_for(existing)
         await self._saleor.update_product(
             product_id=existing.saleor_product_id,
             name=candidate.title,
             slug=slug,
-            category_id=existing.category_id,
+            category_id=saleor_category_id,
         )
         await self._saleor.update_variant(variant_id=existing.saleor_variant_id, sku=sku)
         entry = CatalogueEntry(
@@ -271,6 +281,22 @@ class PublicationBridge:
             reasons=(reason,),
             entry=entry,
         )
+
+    async def _saleor_category_id_for(self, existing: CatalogueEntry) -> str | None:
+        """Map a Velmor category id on the entry to Saleor's category id.
+
+        ``CatalogueEntry.category_id`` is our id; Saleor ``update_product`` needs
+        theirs. A missing category row is a defect in stored data, not a reason
+        to invent an id or to pass ours on the wire.
+        """
+        if existing.category_id is None:
+            return None
+        category = await self._categories.by_id(existing.category_id)
+        if category is None:
+            raise CategoryNotFoundError(
+                f'category {existing.category_id!r} was not found'
+            )
+        return category.saleor_category_id
 
     @staticmethod
     def _sku_for(candidate_id: str) -> str:
