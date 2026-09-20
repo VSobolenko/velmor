@@ -1,10 +1,18 @@
 from __future__ import annotations
 
-from typing import Protocol
+from typing import Protocol, runtime_checkable
 
 from packages.services.src.domain.candidate import Candidate
+from packages.services.src.domain.catalogue import CatalogueEntry
+from packages.services.src.domain.entitlement import Entitlement
 from packages.services.src.domain.gate import GateDecision
 from packages.services.src.domain.rights import RightsRecord
+from packages.services.src.domain.seller import SellerDisclosure
+
+# The platform has one seller, so the disclosure is one row under this fixed key
+# rather than a table that happens to hold one. Both stores import it, so the
+# key exists in one place.
+SELLER_DISCLOSURE_KEY: str = 'seller'
 
 
 class CandidateRepository(Protocol):
@@ -57,5 +65,95 @@ class StorefrontCatalog(Protocol):
         Separate from the length of ``published``: that list is capped, and a page
         that reported the cap as the size of the catalogue would be stating
         something false about the business.
+        """
+        ...
+
+
+@runtime_checkable
+class CatalogueEntryRepository(Protocol):
+    """Storage for catalogue entries: the goods the shop offers for sale.
+
+    An entry is a projection of a decision onto a shop, not a rights record, so
+    ``save_entry`` replaces the row for a good instead of appending one: a good
+    is published and can later be withdrawn, and the storefront has to read the
+    current state of the catalogue. The append-only audit trail is
+    ``rights_records``, which this interface never touches. It must never become
+    the place a publishability decision is made either: an entry arrives already
+    justified by a ``GateDecision``, and nothing here re-derives that.
+    """
+
+    async def save_entry(self, entry: CatalogueEntry) -> None:
+        """Store the entry for its good, replacing any earlier one."""
+        ...
+
+    async def by_candidate(self, candidate_id: str) -> CatalogueEntry | None:
+        """The entry for one good, or ``None`` if it is not in the catalogue."""
+        ...
+
+    async def by_category(self, category_id: str) -> tuple[CatalogueEntry, ...]:
+        """The entries in one category, most recently published first.
+
+        An empty tuple means the category holds no entries, which is the one
+        question a caller deciding whether the category can be removed asks.
+        """
+        ...
+
+    async def entries(self, limit: int) -> tuple[CatalogueEntry, ...]:
+        """The catalogue, most recently published first, capped at ``limit``."""
+        ...
+
+
+@runtime_checkable
+class EntitlementRepository(Protocol):
+    """Storage for a buyer's right to download one good.
+
+    An entitlement is a fact about one purchase, keyed by the order that paid
+    for it, so a refund revokes exactly what it refunded and a second order for
+    the same good survives. It must never become a query that filters by state:
+    ``for_buyer_candidate`` returns every row for that buyer and good, because a
+    refused download has to tell "never bought" apart from "revoked, and here is
+    why", and the reason is only reachable if the revoked row is returned.
+    """
+
+    async def save_entitlement(self, entitlement: Entitlement) -> None:
+        """Store the entitlement, replacing any earlier one for its order and good."""
+        ...
+
+    async def for_buyer(self, buyer_id: str) -> tuple[Entitlement, ...]:
+        """One buyer's entitlements, most recently granted first."""
+        ...
+
+    async def for_buyer_candidate(
+        self, buyer_id: str, candidate_id: str
+    ) -> tuple[Entitlement, ...]:
+        """Every entitlement that buyer holds for one good, of every state.
+
+        An empty tuple means the buyer never bought the good. A revoked
+        entitlement is returned with its reason; what to do about it is the
+        caller's decision, not this interface's.
+        """
+        ...
+
+
+@runtime_checkable
+class SellerDisclosureRepository(Protocol):
+    """Storage for the seller's legal identity, written by an operator command.
+
+    The platform has one seller, so there is one row under
+    ``SELLER_DISCLOSURE_KEY`` and ``save_disclosure`` replaces it. The disclosure
+    is stored data and not a setting (design D7), so this interface must never
+    gain a default or a "best effort" accessor that makes an unconfigured item
+    quiet: an absent item is what makes checkout refuse.
+    """
+
+    async def save_disclosure(self, disclosure: SellerDisclosure) -> None:
+        """Store the disclosure, replacing the one configured before it."""
+        ...
+
+    async def current(self) -> SellerDisclosure | None:
+        """The configured disclosure, or ``None`` if none was configured.
+
+        ``None`` is the row that does not exist yet, which the completeness
+        check reports as every item missing. It is not an empty disclosure.
         """
         ...

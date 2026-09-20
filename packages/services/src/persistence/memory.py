@@ -1,19 +1,27 @@
 from __future__ import annotations
 
+from collections.abc import Iterable
+
 from packages.services.src.domain.candidate import Candidate
+from packages.services.src.domain.catalogue import CatalogueEntry
+from packages.services.src.domain.entitlement import Entitlement
 from packages.services.src.domain.gate import GateDecision
 from packages.services.src.domain.rights import RightsRecord
+from packages.services.src.domain.seller import SellerDisclosure
+from packages.services.src.persistence.contract import SELLER_DISCLOSURE_KEY
 
 
 class InMemoryStore:
-    """Candidate and verdict storage held in process memory, for tests and dry runs.
+    """Candidate, verdict and commerce storage held in process memory, for tests and dry runs.
 
-    It implements both repository protocols, as ``PostgresStore`` does, because
+    It implements every repository protocol, as ``PostgresStore`` does, because
     the two are one contract in practice: ``pending_audit`` is an anti-join
     against the verdicts. A double that kept candidates and verdicts in separate
     objects would hand the auditor every candidate it had already decided, and a
     test written against it would prove behaviour the production store does not
-    have.
+    have. The commerce repositories are held here for the same reason: a test
+    that exercised them against a different double would not describe the store
+    the process runs.
 
     Insertion order is preserved so ``pending_audit`` is deterministic, which is
     what lets a test assert the order the auditor will process a batch in.
@@ -22,6 +30,9 @@ class InMemoryStore:
     def __init__(self) -> None:
         self._candidates: dict[str, Candidate] = {}
         self._decisions: dict[str, GateDecision] = {}
+        self._entries: dict[str, CatalogueEntry] = {}
+        self._entitlements: dict[tuple[str, str], Entitlement] = {}
+        self._disclosures: dict[str, SellerDisclosure] = {}
 
     async def upsert_many(self, candidates: tuple[Candidate, ...]) -> int:
         written = 0
@@ -55,6 +66,65 @@ class InMemoryStore:
             1
             for candidate_id, decision in self._decisions.items()
             if decision.publishable and candidate_id in self._candidates
+        )
+
+    async def save_entry(self, entry: CatalogueEntry) -> None:
+        self._entries[entry.candidate_id] = entry
+
+    async def by_candidate(self, candidate_id: str) -> CatalogueEntry | None:
+        return self._entries.get(candidate_id)
+
+    async def by_category(self, category_id: str) -> tuple[CatalogueEntry, ...]:
+        return self._in_catalogue_order(
+            entry for entry in self._entries.values() if entry.category_id == category_id
+        )
+
+    async def entries(self, limit: int) -> tuple[CatalogueEntry, ...]:
+        return self._in_catalogue_order(self._entries.values())[:limit]
+
+    async def save_entitlement(self, entitlement: Entitlement) -> None:
+        self._entitlements[(entitlement.order_id, entitlement.candidate_id)] = entitlement
+
+    async def for_buyer(self, buyer_id: str) -> tuple[Entitlement, ...]:
+        return self._in_grant_order(
+            entitlement
+            for entitlement in self._entitlements.values()
+            if entitlement.buyer_id == buyer_id
+        )
+
+    async def for_buyer_candidate(
+        self, buyer_id: str, candidate_id: str
+    ) -> tuple[Entitlement, ...]:
+        return self._in_grant_order(
+            entitlement
+            for entitlement in self._entitlements.values()
+            if entitlement.buyer_id == buyer_id
+            and entitlement.candidate_id == candidate_id
+        )
+
+    async def save_disclosure(self, disclosure: SellerDisclosure) -> None:
+        self._disclosures[SELLER_DISCLOSURE_KEY] = disclosure
+
+    async def current(self) -> SellerDisclosure | None:
+        return self._disclosures.get(SELLER_DISCLOSURE_KEY)
+
+    @staticmethod
+    def _in_catalogue_order(entries: Iterable[CatalogueEntry]) -> tuple[CatalogueEntry, ...]:
+        """Most recently published first, ``candidate_id`` breaking a tie.
+
+        Two stable sorts rather than one: no single key orders descending by
+        ``published_at`` and ascending by ``candidate_id`` at the same time.
+        """
+        by_candidate = sorted(entries, key=lambda entry: entry.candidate_id)
+        return tuple(sorted(by_candidate, key=lambda entry: entry.published_at, reverse=True))
+
+    @staticmethod
+    def _in_grant_order(entitlements: Iterable[Entitlement]) -> tuple[Entitlement, ...]:
+        """Most recently granted first, ``candidate_id`` then ``order_id`` breaking a tie."""
+        by_order = sorted(entitlements, key=lambda entitlement: entitlement.order_id)
+        by_candidate = sorted(by_order, key=lambda entitlement: entitlement.candidate_id)
+        return tuple(
+            sorted(by_candidate, key=lambda entitlement: entitlement.granted_at, reverse=True)
         )
 
     def stored_ids(self) -> tuple[str, ...]:

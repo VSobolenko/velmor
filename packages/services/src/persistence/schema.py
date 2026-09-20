@@ -49,3 +49,33 @@ class Schema:
         Column('record', JSONB, nullable=False),
         Column('decided_at', DateTime(timezone=True), nullable=False),
     )
+
+    catalogue_entries = Table(
+        'catalogue_entries',
+        metadata,
+        Column('candidate_id', Text, primary_key=True),
+        Column('source_id', Text, nullable=False),
+        Column('category_id', Text, nullable=True, index=True),
+        Column('listing', Text, nullable=False),
+        Column('state', Text, nullable=False),
+        Column('published_at', DateTime(timezone=True), nullable=False),
+        Column('entry', JSONB, nullable=False),
+    )
+
+    entitlements = Table(
+        'entitlements',
+        metadata,
+        Column('order_id', Text, primary_key=True),
+        Column('candidate_id', Text, primary_key=True),
+        Column('buyer_id', Text, nullable=False, index=True),
+        Column('state', Text, nullable=False),
+        Column('granted_at', DateTime(timezone=True), nullable=False),
+        Column('entitlement', JSONB, nullable=False),
+    )
+
+    seller_disclosure = Table(
+        'seller_disclosure',
+        metadata,
+        Column('id', Text, primary_key=True),
+        Column('disclosure', JSONB, nullable=False),
+    )

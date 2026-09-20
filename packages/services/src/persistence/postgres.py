@@ -5,16 +5,20 @@ from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
 from packages.services.src.domain.candidate import Candidate
+from packages.services.src.domain.catalogue import CatalogueEntry
+from packages.services.src.domain.entitlement import Entitlement
 from packages.services.src.domain.gate import GateDecision
 from packages.services.src.domain.rights import RightsRecord
+from packages.services.src.domain.seller import SellerDisclosure
+from packages.services.src.persistence.contract import SELLER_DISCLOSURE_KEY
 from packages.services.src.persistence.schema import Schema
 
 
 class PostgresStore:
-    """Candidate and verdict storage in PostgreSQL.
+    """Candidate, verdict and commerce storage in PostgreSQL.
 
-    Satisfies both repository protocols; the two interfaces stay separate because
-    the operations belong to different stages of the pipeline.
+    Satisfies every repository protocol; the interfaces stay separate because the
+    operations belong to different stages of the pipeline.
 
     ``pending_audit`` is an anti-join against the verdict table, so a candidate is
     re-examined only while it has no recorded outcome. That is what makes a run
@@ -137,6 +141,156 @@ class PostgresStore:
         async with self._session_factory() as session:
             await session.execute(statement)
             await session.commit()
+
+    async def save_entry(self, entry: CatalogueEntry) -> None:
+        statement = (
+            insert(Schema.catalogue_entries)
+            .values(
+                candidate_id=entry.candidate_id,
+                source_id=entry.source_id,
+                category_id=entry.category_id,
+                listing=entry.listing.value,
+                state=entry.state.value,
+                published_at=entry.published_at,
+                entry=entry.model_dump(mode='json'),
+            )
+            .on_conflict_do_update(
+                index_elements=['candidate_id'],
+                set_={
+                    'source_id': entry.source_id,
+                    'category_id': entry.category_id,
+                    'listing': entry.listing.value,
+                    'state': entry.state.value,
+                    'published_at': entry.published_at,
+                    'entry': entry.model_dump(mode='json'),
+                },
+            )
+        )
+        async with self._session_factory() as session:
+            await session.execute(statement)
+            await session.commit()
+
+    async def by_candidate(self, candidate_id: str) -> CatalogueEntry | None:
+        statement = select(Schema.catalogue_entries.c.entry).where(
+            Schema.catalogue_entries.c.candidate_id == candidate_id
+        )
+        async with self._session_factory() as session:
+            row = (await session.execute(statement)).mappings().one_or_none()
+        if row is None:
+            return None
+        return CatalogueEntry.model_validate(row['entry'])
+
+    async def by_category(self, category_id: str) -> tuple[CatalogueEntry, ...]:
+        statement = (
+            select(Schema.catalogue_entries.c.entry)
+            .where(Schema.catalogue_entries.c.category_id == category_id)
+            .order_by(
+                Schema.catalogue_entries.c.published_at.desc(),
+                Schema.catalogue_entries.c.candidate_id,
+            )
+        )
+        async with self._session_factory() as session:
+            rows = (await session.execute(statement)).mappings().all()
+        return tuple(CatalogueEntry.model_validate(row['entry']) for row in rows)
+
+    async def entries(self, limit: int) -> tuple[CatalogueEntry, ...]:
+        statement = (
+            select(Schema.catalogue_entries.c.entry)
+            .order_by(
+                Schema.catalogue_entries.c.published_at.desc(),
+                Schema.catalogue_entries.c.candidate_id,
+            )
+            .limit(limit)
+        )
+        async with self._session_factory() as session:
+            rows = (await session.execute(statement)).mappings().all()
+        return tuple(CatalogueEntry.model_validate(row['entry']) for row in rows)
+
+    async def save_entitlement(self, entitlement: Entitlement) -> None:
+        statement = (
+            insert(Schema.entitlements)
+            .values(
+                order_id=entitlement.order_id,
+                candidate_id=entitlement.candidate_id,
+                buyer_id=entitlement.buyer_id,
+                state=entitlement.state.value,
+                granted_at=entitlement.granted_at,
+                entitlement=entitlement.model_dump(mode='json'),
+            )
+            .on_conflict_do_update(
+                index_elements=['order_id', 'candidate_id'],
+                set_={
+                    'buyer_id': entitlement.buyer_id,
+                    'state': entitlement.state.value,
+                    'granted_at': entitlement.granted_at,
+                    'entitlement': entitlement.model_dump(mode='json'),
+                },
+            )
+        )
+        async with self._session_factory() as session:
+            await session.execute(statement)
+            await session.commit()
+
+    async def for_buyer(self, buyer_id: str) -> tuple[Entitlement, ...]:
+        statement = (
+            select(Schema.entitlements.c.entitlement)
+            .where(Schema.entitlements.c.buyer_id == buyer_id)
+            .order_by(
+                Schema.entitlements.c.granted_at.desc(),
+                Schema.entitlements.c.candidate_id,
+                Schema.entitlements.c.order_id,
+            )
+        )
+        async with self._session_factory() as session:
+            rows = (await session.execute(statement)).mappings().all()
+        return tuple(Entitlement.model_validate(row['entitlement']) for row in rows)
+
+    async def for_buyer_candidate(
+        self, buyer_id: str, candidate_id: str
+    ) -> tuple[Entitlement, ...]:
+        # No state filter, on purpose: a revoked row has to stay reachable so a
+        # refused download can carry its reason instead of reporting no purchase.
+        statement = (
+            select(Schema.entitlements.c.entitlement)
+            .where(
+                Schema.entitlements.c.buyer_id == buyer_id,
+                Schema.entitlements.c.candidate_id == candidate_id,
+            )
+            .order_by(
+                Schema.entitlements.c.granted_at.desc(),
+                Schema.entitlements.c.candidate_id,
+                Schema.entitlements.c.order_id,
+            )
+        )
+        async with self._session_factory() as session:
+            rows = (await session.execute(statement)).mappings().all()
+        return tuple(Entitlement.model_validate(row['entitlement']) for row in rows)
+
+    async def save_disclosure(self, disclosure: SellerDisclosure) -> None:
+        statement = (
+            insert(Schema.seller_disclosure)
+            .values(
+                id=SELLER_DISCLOSURE_KEY,
+                disclosure=disclosure.model_dump(mode='json'),
+            )
+            .on_conflict_do_update(
+                index_elements=['id'],
+                set_={'disclosure': disclosure.model_dump(mode='json')},
+            )
+        )
+        async with self._session_factory() as session:
+            await session.execute(statement)
+            await session.commit()
+
+    async def current(self) -> SellerDisclosure | None:
+        statement = select(Schema.seller_disclosure.c.disclosure).where(
+            Schema.seller_disclosure.c.id == SELLER_DISCLOSURE_KEY
+        )
+        async with self._session_factory() as session:
+            row = (await session.execute(statement)).mappings().one_or_none()
+        if row is None:
+            return None
+        return SellerDisclosure.model_validate(row['disclosure'])
 
     @staticmethod
     def _row_for(candidate: Candidate) -> dict:
