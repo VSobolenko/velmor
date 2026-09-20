@@ -74,7 +74,13 @@ class TestEntitlement:
         assert entitlement.state is EntitlementState.ACTIVE
 
     def test_the_revocation_fields_default_to_none(self) -> None:
-        entitlement = build_entitlement()
+        entitlement = Entitlement(
+            buyer_id='buyer-1',
+            candidate_id='openverse:1',
+            order_id='order-1',
+            granted_at=GRANTED_AT,
+            state=EntitlementState.ACTIVE,
+        )
 
         assert entitlement.revoked_at is None
         assert entitlement.revocation_reason is None
