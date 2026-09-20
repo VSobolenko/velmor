@@ -61,6 +61,7 @@ DISC="$(curl -fsS "$API/checkout/disclosure")"
 printf '%s' "$DISC" | python3 -c 'import json,sys; d=json.load(sys.stdin); assert d["complete"] is True, d; print("disclosure_complete=true")'
 
 echo "=== POST /checkout/start (stub) ==="
+export RETURN_URL CANDIDATE_ID UNIT_AMOUNT CURRENCY
 START_BODY="$(python3 -c '
 import json, os
 print(json.dumps({
@@ -73,8 +74,7 @@ print(json.dumps({
     "quantity": 1,
   }],
 }))
-' )"
-export RETURN_URL CANDIDATE_ID UNIT_AMOUNT CURRENCY
+')"
 START="$(curl -fsS -X POST "$API/checkout/start" \
   -H "Content-Type: application/json" \
   -H "X-Buyer-Id: $BUYER" \
