@@ -2,6 +2,7 @@ import { notFound } from "next/navigation";
 import { AddToCartButton } from "@/components/AddToCartButton";
 import { ShopChrome } from "@/components/ShopChrome";
 import { CommerceApiClient, CommerceApiError } from "@/lib/api";
+import { copy } from "@/lib/copy";
 import styles from "../../shop.module.css";
 
 export const dynamic = "force-dynamic";
@@ -24,24 +25,23 @@ export default async function GoodPage({ params }: Props) {
   }
 
   const licenseLabel =
-    good.license_id === null ? "No licence identity recorded" : good.license_id;
+    good.license_id === null ? copy.noLicence : good.license_id;
 
   return (
-    <div className={styles.page}>
-      <ShopChrome tagline="Product" />
+    <ShopChrome tagline={copy.product}>
       <main className={styles.main}>
         <h1 className={styles.heading}>{good.title}</h1>
         <p className={styles.meta}>
-          {good.creator === null ? "Unknown creator" : good.creator}
+          {good.creator === null ? copy.unknownCreator : good.creator}
         </p>
         <p className={styles.price}>
           {good.unit_amount} {good.currency}
         </p>
-        <p className={styles.license}>Licence</p>
+        <p className={styles.license}>{copy.licence}</p>
         <p className={styles.licenseValue}>{licenseLabel}</p>
-        <p className={styles.license}>Obligations</p>
+        <p className={styles.license}>{copy.obligations}</p>
         {good.obligations.length === 0 ? (
-          <p className={styles.empty}>No obligations</p>
+          <p className={styles.empty}>{copy.noObligations}</p>
         ) : (
           <ul className={styles.obligations}>
             {good.obligations.map((item) => (
@@ -58,6 +58,6 @@ export default async function GoodPage({ params }: Props) {
           />
         </div>
       </main>
-    </div>
+    </ShopChrome>
   );
 }

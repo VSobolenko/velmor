@@ -1,3 +1,4 @@
+import Image from "next/image";
 import Link from "next/link";
 import { ShopChrome } from "@/components/ShopChrome";
 import {
@@ -6,6 +7,8 @@ import {
   type CatalogueGood,
   type CategorySummary,
 } from "@/lib/api";
+import { categoryImageSrc, HERO_IMAGE_SRC } from "@/lib/brand";
+import { copy } from "@/lib/copy";
 import styles from "./shop.module.css";
 
 export const dynamic = "force-dynamic";
@@ -44,35 +47,69 @@ export default async function Home() {
     } else if (error instanceof Error) {
       data = { kind: "error", message: error.message };
     } else {
-      data = { kind: "error", message: "catalogue unavailable" };
+      data = { kind: "error", message: copy.catalogueUnavailable };
     }
   }
 
+  const hero = (
+    <section className={styles.hero} aria-label={copy.brand}>
+      <Image
+        className={styles.heroImage}
+        src={HERO_IMAGE_SRC}
+        alt=""
+        fill
+        priority
+        sizes="100vw"
+      />
+      <div className={styles.heroOverlay} aria-hidden="true" />
+      <div className={styles.heroContent}>
+        <h1 className={styles.heroBrand}>{copy.brand}</h1>
+        <p className={styles.heroSupport}>{copy.heroSupport}</p>
+        <div className={styles.heroActions}>
+          <a className={`${styles.button} ${styles.buttonAccent}`} href="#catalogue">
+            {copy.catalogCta}
+          </a>
+        </div>
+      </div>
+    </section>
+  );
+
   return (
-    <div className={styles.page}>
-      <ShopChrome tagline="Goods that passed the Velmor rights gate" />
-      <main className={styles.main}>
+    <ShopChrome tagline={copy.heroSupport} hero={hero}>
+      <main id="catalogue" className={styles.main}>
         {data.kind === "error" ? (
           <p className={styles.error}>{data.message}</p>
         ) : (
           <>
-            <h1 className={styles.heading}>Categories</h1>
+            <h2 className={styles.heading}>{copy.categories}</h2>
             {data.categories.length === 0 ? (
-              <p className={styles.empty}>No categories yet.</p>
+              <p className={styles.empty}>{copy.noCategories}</p>
             ) : (
-              <ul className={styles.list}>
+              <ul className={styles.categoryGrid}>
                 {data.categories.map((category) => (
                   <li key={category.category_id}>
-                    <Link href={`/categories/${category.slug}`}>
-                      {category.name}
+                    <Link
+                      className={styles.categoryTile}
+                      href={`/categories/${category.slug}`}
+                    >
+                      <Image
+                        className={styles.categoryTileImage}
+                        src={categoryImageSrc(category.slug)}
+                        alt=""
+                        width={480}
+                        height={360}
+                      />
+                      <span className={styles.categoryTileLabel}>
+                        {category.name}
+                      </span>
                     </Link>
                   </li>
                 ))}
               </ul>
             )}
-            <h2 className={styles.subheading}>Recent goods</h2>
+            <h2 className={styles.subheading}>{copy.recentGoods}</h2>
             {data.goods.length === 0 ? (
-              <p className={styles.empty}>Nothing in the catalogue yet.</p>
+              <p className={styles.empty}>{copy.noGoods}</p>
             ) : (
               <ul className={styles.list}>
                 {data.goods.map((good) => (
@@ -92,6 +129,6 @@ export default async function Home() {
           </>
         )}
       </main>
-    </div>
+    </ShopChrome>
   );
 }

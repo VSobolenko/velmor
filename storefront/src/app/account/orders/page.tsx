@@ -5,6 +5,7 @@ import {
   CommerceApiError,
   type Order,
 } from "@/lib/api";
+import { copy } from "@/lib/copy";
 import styles from "../../shop.module.css";
 
 export const dynamic = "force-dynamic";
@@ -29,22 +30,21 @@ export default async function OrdersPage() {
     } else if (error instanceof Error) {
       data = { kind: "error", message: error.message };
     } else {
-      data = { kind: "error", message: "orders unavailable" };
+      data = { kind: "error", message: copy.ordersUnavailable };
     }
   }
 
   return (
-    <div className={styles.page}>
-      <ShopChrome tagline="Orders" />
+    <ShopChrome tagline={copy.orders}>
       <main className={styles.main}>
-        <h1 className={styles.heading}>Orders</h1>
+        <h1 className={styles.heading}>{copy.orders}</h1>
         <p className={styles.status}>
-          <Link href="/account">Back to account</Link>
+          <Link href="/account">{copy.backToAccount}</Link>
         </p>
         {data.kind === "error" ? (
           <p className={styles.error}>{data.message}</p>
         ) : data.orders.length === 0 ? (
-          <p className={styles.empty}>No orders yet.</p>
+          <p className={styles.empty}>{copy.noOrders}</p>
         ) : (
           <ul className={styles.list}>
             {data.orders.map((order) => (
@@ -63,6 +63,6 @@ export default async function OrdersPage() {
           </ul>
         )}
       </main>
-    </div>
+    </ShopChrome>
   );
 }

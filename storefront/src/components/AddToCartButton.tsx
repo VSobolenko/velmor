@@ -2,6 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { addToCart } from "@/lib/cart";
+import { copy } from "@/lib/copy";
 import styles from "@/app/shop.module.css";
 
 type Props = {
@@ -32,7 +33,7 @@ export function AddToCartButton({
 
   return (
     <button type="button" className={styles.button} onClick={onClick}>
-      Add to cart
+      {copy.addToCart}
     </button>
   );
 }

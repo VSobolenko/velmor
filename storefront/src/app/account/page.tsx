@@ -1,28 +1,25 @@
 import Link from "next/link";
 import { ShopChrome } from "@/components/ShopChrome";
+import { copy } from "@/lib/copy";
 import styles from "../shop.module.css";
 
 export default function AccountPage() {
   return (
-    <div className={styles.page}>
-      <ShopChrome tagline="Account" />
+    <ShopChrome tagline={copy.account}>
       <main className={styles.main}>
-        <h1 className={styles.heading}>Account</h1>
-        <p className={styles.meta}>
-          Buyer identity is the demo header{" "}
-          <code>NEXT_PUBLIC_BUYER_ID</code> until real auth arrives.
-        </p>
+        <h1 className={styles.heading}>{copy.account}</h1>
+        <p className={styles.meta}>{copy.accountDemoNote}</p>
         <ul className={styles.list}>
           <li>
-            <Link href="/account/orders">Orders</Link>
-            <p className={styles.meta}>Order history for this buyer</p>
+            <Link href="/account/orders">{copy.orders}</Link>
+            <p className={styles.meta}>{copy.ordersHint}</p>
           </li>
           <li>
-            <Link href="/account/entitlements">Entitlements</Link>
-            <p className={styles.meta}>Downloads for paid goods</p>
+            <Link href="/account/entitlements">{copy.entitlements}</Link>
+            <p className={styles.meta}>{copy.entitlementsHint}</p>
           </li>
         </ul>
       </main>
-    </div>
+    </ShopChrome>
   );
 }

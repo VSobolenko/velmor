@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
+import { PaymentMarks } from "@/components/PaymentMarks";
 import { ShopChrome } from "@/components/ShopChrome";
 import {
   CommerceApiClient,
@@ -9,6 +10,7 @@ import {
   type CheckoutDisclosureResponse,
 } from "@/lib/api";
 import { type CartLine, readCart } from "@/lib/cart";
+import { copy } from "@/lib/copy";
 import styles from "../shop.module.css";
 
 const ORDER_STORAGE_KEY = "velmor.checkout.order_id";
@@ -16,25 +18,25 @@ const ORDER_STORAGE_KEY = "velmor.checkout.order_id";
 type ProviderId = "stripe" | "bepaid";
 
 const PROVIDERS: { id: ProviderId; label: string }[] = [
-  { id: "stripe", label: "Stripe" },
-  { id: "bepaid", label: "bePaid (card / ERIP)" },
+  { id: "stripe", label: copy.providerStripe },
+  { id: "bepaid", label: copy.providerBepaid },
 ];
 
 const DISCLOSURE_FIELDS: {
   key: keyof CheckoutDisclosureResponse["disclosure"];
   label: string;
 }[] = [
-  { key: "legal_name", label: "Legal name" },
-  { key: "registration_number", label: "Registration number" },
-  { key: "registration_date", label: "Registration date" },
-  { key: "registration_authority", label: "Registration authority" },
-  { key: "shop_register_number", label: "Shop register number" },
-  { key: "postal_address", label: "Postal address" },
-  { key: "working_hours", label: "Working hours" },
-  { key: "contact_details", label: "Contact details" },
-  { key: "payment_rules", label: "Payment rules" },
-  { key: "return_rules", label: "Return rules" },
-  { key: "payment_system_marks", label: "Payment system marks" },
+  { key: "legal_name", label: copy.disclosureLegalName },
+  { key: "registration_number", label: copy.disclosureRegNumber },
+  { key: "registration_date", label: copy.disclosureRegDate },
+  { key: "registration_authority", label: copy.disclosureRegAuthority },
+  { key: "shop_register_number", label: copy.disclosureShopRegister },
+  { key: "postal_address", label: copy.disclosurePostal },
+  { key: "working_hours", label: copy.disclosureHours },
+  { key: "contact_details", label: copy.disclosureContact },
+  { key: "payment_rules", label: copy.disclosurePaymentRules },
+  { key: "return_rules", label: copy.disclosureReturnRules },
+  { key: "payment_system_marks", label: copy.disclosurePaymentMarks },
 ];
 
 function formatField(
@@ -89,7 +91,7 @@ export default function CheckoutPage() {
             ? error.detail
             : error instanceof Error
               ? error.message
-              : "Failed to load seller disclosure";
+              : copy.disclosureLoadFailed;
         setLoadError(detail);
       });
   }, []);
@@ -98,11 +100,11 @@ export default function CheckoutPage() {
     setPayError(null);
     const currency = cartCurrency(lines);
     if (currency === null) {
-      setPayError("Cart lines must share one currency.");
+      setPayError(copy.cartMustShareCurrency);
       return;
     }
     if (disclosure === null || !disclosure.complete) {
-      setPayError("Checkout is unavailable until seller disclosure is complete.");
+      setPayError(copy.checkoutUnavailableDisclosure);
       return;
     }
     setPaying(true);
@@ -127,7 +129,7 @@ export default function CheckoutPage() {
           ? error.detail
           : error instanceof Error
             ? error.message
-            : "Checkout failed";
+            : copy.checkoutFailed;
       setPayError(detail);
       setPaying(false);
     }
@@ -142,22 +144,22 @@ export default function CheckoutPage() {
     loadError === null;
 
   return (
-    <div className={styles.page}>
-      <ShopChrome tagline="Checkout" />
+    <ShopChrome tagline={copy.checkout}>
       <main className={styles.main}>
-        <h1 className={styles.heading}>Checkout</h1>
+        <h1 className={styles.heading}>{copy.checkout}</h1>
         {!clientReady ? (
-          <p className={styles.meta}>Loading…</p>
+          <p className={styles.meta}>{copy.loading}</p>
         ) : lines.length === 0 ? (
           <p className={styles.empty}>
-            Your cart is empty. <Link href="/">Browse the catalogue</Link>.
+            {copy.cartEmptyCheckout}{" "}
+            <Link href="/">{copy.browseCatalogue}</Link>.
           </p>
         ) : (
           <>
-            <h2 className={styles.subheading}>Cart</h2>
+            <h2 className={styles.subheading}>{copy.cart}</h2>
             <ul className={styles.list}>
               {lines.map((line) => (
-                <li key={line.candidate_id}>
+                <li key={line.candidate_id} className={styles.cartLine}>
                   <Link href={`/goods/${encodeURIComponent(line.candidate_id)}`}>
                     {line.title}
                   </Link>
@@ -168,23 +170,18 @@ export default function CheckoutPage() {
               ))}
             </ul>
             {currency === null ? (
-              <p className={styles.error}>
-                Cart lines use mixed currencies. Remove lines until one currency
-                remains.
-              </p>
+              <p className={styles.error}>{copy.mixedCurrency}</p>
             ) : null}
 
-            <h2 className={styles.subheading}>Seller disclosure</h2>
+            <h2 className={styles.subheading}>{copy.sellerDisclosure}</h2>
             {loadError !== null ? (
               <p className={styles.error}>{loadError}</p>
             ) : disclosure === null ? (
-              <p className={styles.meta}>Loading disclosure…</p>
+              <p className={styles.meta}>{copy.disclosureLoading}</p>
             ) : !disclosure.complete ? (
               <>
-                <p className={styles.error}>
-                  Checkout is unavailable while seller disclosure is incomplete.
-                </p>
-                <p className={styles.meta}>Missing items:</p>
+                <p className={styles.error}>{copy.disclosureIncomplete}</p>
+                <p className={styles.meta}>{copy.missingItems}</p>
                 <ul className={styles.list}>
                   {disclosure.missing.map((item) => (
                     <li key={item}>
@@ -194,19 +191,29 @@ export default function CheckoutPage() {
                 </ul>
               </>
             ) : (
-              <dl className={styles.disclosureList}>
-                {DISCLOSURE_FIELDS.map(({ key, label }) => (
-                  <div key={key} className={styles.disclosureRow}>
-                    <dt>{label}</dt>
-                    <dd>{formatField(key, disclosure.disclosure)}</dd>
-                  </div>
-                ))}
-              </dl>
+              <>
+                <dl className={styles.disclosureList}>
+                  {DISCLOSURE_FIELDS.filter(
+                    ({ key }) => key !== "payment_system_marks",
+                  ).map(({ key, label }) => (
+                    <div key={key} className={styles.disclosureRow}>
+                      <dt>{label}</dt>
+                      <dd>{formatField(key, disclosure.disclosure)}</dd>
+                    </div>
+                  ))}
+                </dl>
+                <div className={styles.checkoutMarks}>
+                  <PaymentMarks
+                    marks={disclosure.disclosure.payment_system_marks}
+                    labelled
+                  />
+                </div>
+              </>
             )}
 
-            <h2 className={styles.subheading}>Payment provider</h2>
+            <h2 className={styles.subheading}>{copy.paymentProvider}</h2>
             <fieldset className={styles.fieldset} disabled={!canPay && !paying}>
-              <legend className={styles.legend}>Choose a provider</legend>
+              <legend className={styles.legend}>{copy.chooseProvider}</legend>
               {PROVIDERS.map((provider) => (
                 <label key={provider.id} className={styles.radioLabel}>
                   <input
@@ -231,17 +238,17 @@ export default function CheckoutPage() {
                   void onPay();
                 }}
               >
-                {paying ? "Redirecting…" : "Pay"}
+                {paying ? copy.redirecting : copy.pay}
               </button>
             </div>
             {payError !== null ? <p className={styles.error}>{payError}</p> : null}
             <p className={styles.status}>
-              Buyer identity is the configured demo buyer id until account auth
-              lands. <Link href="/cart">Back to cart</Link>
+              {copy.buyerDemoNote}{" "}
+              <Link href="/cart">{copy.backToCart}</Link>
             </p>
           </>
         )}
       </main>
-    </div>
+    </ShopChrome>
   );
 }

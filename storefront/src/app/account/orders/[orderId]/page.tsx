@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import { DownloadButton } from "@/components/DownloadButton";
 import { ShopChrome } from "@/components/ShopChrome";
 import { CommerceApiClient, CommerceApiError, type Order } from "@/lib/api";
+import { copy } from "@/lib/copy";
 import styles from "../../../shop.module.css";
 
 export const dynamic = "force-dynamic";
@@ -27,18 +28,17 @@ export default async function OrderDetailPage({ params }: Props) {
   const isPaid = order.state === "paid";
 
   return (
-    <div className={styles.page}>
-      <ShopChrome tagline="Order" />
+    <ShopChrome tagline={copy.order}>
       <main className={styles.main}>
         <h1 className={styles.heading}>{order.order_id}</h1>
         <p className={styles.meta}>
           {order.state} · {order.total} {order.currency} · {order.created_at}
         </p>
         <p className={styles.status}>
-          <Link href="/account/orders">All orders</Link>
+          <Link href="/account/orders">{copy.allOrders}</Link>
         </p>
 
-        <h2 className={styles.subheading}>Lines</h2>
+        <h2 className={styles.subheading}>{copy.lines}</h2>
         <ul className={styles.list}>
           {order.lines.map((line) => (
             <li key={line.candidate_id}>
@@ -54,10 +54,10 @@ export default async function OrderDetailPage({ params }: Props) {
 
         {isPaid ? (
           <>
-            <h2 className={styles.subheading}>Downloads</h2>
+            <h2 className={styles.subheading}>{copy.downloads}</h2>
             <p className={styles.meta}>
-              This order is paid. Goods below are covered; you can also open{" "}
-              <Link href="/account/entitlements">entitlements</Link>.
+              {copy.orderPaidDownloadsHint}{" "}
+              <Link href="/account/entitlements">{copy.entitlements}</Link>.
             </p>
             <ul className={styles.list}>
               {order.lines.map((line) => (
@@ -72,13 +72,11 @@ export default async function OrderDetailPage({ params }: Props) {
           </>
         ) : (
           <>
-            <h2 className={styles.subheading}>Downloads</h2>
-            <p className={styles.empty}>
-              This order is unpaid. No download is available.
-            </p>
+            <h2 className={styles.subheading}>{copy.downloads}</h2>
+            <p className={styles.empty}>{copy.orderUnpaid}</p>
           </>
         )}
       </main>
-    </div>
+    </ShopChrome>
   );
 }

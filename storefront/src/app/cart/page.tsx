@@ -9,6 +9,7 @@ import {
   removeLine,
   setLineQuantity,
 } from "@/lib/cart";
+import { copy } from "@/lib/copy";
 import styles from "../shop.module.css";
 
 export default function CartPage() {
@@ -37,12 +38,11 @@ export default function CartPage() {
   }
 
   return (
-    <div className={styles.page}>
-      <ShopChrome tagline="Cart" />
+    <ShopChrome tagline={copy.cart}>
       <main className={styles.main}>
-        <h1 className={styles.heading}>Cart</h1>
+        <h1 className={styles.heading}>{copy.cart}</h1>
         {lines.length === 0 ? (
-          <p className={styles.empty}>Your cart is empty.</p>
+          <p className={styles.empty}>{copy.cartEmpty}</p>
         ) : (
           <>
             <ul className={styles.list}>
@@ -52,11 +52,11 @@ export default function CartPage() {
                     {line.title}
                   </Link>
                   <p className={styles.meta}>
-                    {line.unit_amount} {line.currency} each
+                    {line.unit_amount} {line.currency} {copy.each}
                   </p>
                   <div className={styles.cartControls}>
                     <label className={styles.qtyLabel}>
-                      Qty
+                      {copy.qty}
                       <input
                         className={styles.qtyInput}
                         type="number"
@@ -75,7 +75,7 @@ export default function CartPage() {
                       className={styles.linkButton}
                       onClick={() => onRemove(line.candidate_id)}
                     >
-                      Remove
+                      {copy.remove}
                     </button>
                   </div>
                 </li>
@@ -83,12 +83,12 @@ export default function CartPage() {
             </ul>
             <div className={styles.actions}>
               <Link href="/checkout" className={styles.button}>
-                Pay
+                {copy.pay}
               </Link>
             </div>
           </>
         )}
       </main>
-    </div>
+    </ShopChrome>
   );
 }

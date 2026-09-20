@@ -5,6 +5,7 @@ import {
   CommerceApiClient,
   CommerceApiError,
 } from "@/lib/api";
+import { copy } from "@/lib/copy";
 import styles from "@/app/shop.module.css";
 
 type Props = {
@@ -13,7 +14,10 @@ type Props = {
 };
 
 /** Issue a grant, fetch bytes with X-Buyer-Id, trigger a browser save. */
-export function DownloadButton({ candidateId, label = "Download" }: Props) {
+export function DownloadButton({
+  candidateId,
+  label = copy.download,
+}: Props) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -30,7 +34,7 @@ export function DownloadButton({ candidateId, label = "Download" }: Props) {
       } else if (err instanceof Error) {
         setError(err.message);
       } else {
-        setError("download failed");
+        setError(copy.downloadFailed);
       }
     } finally {
       setBusy(false);
@@ -45,7 +49,7 @@ export function DownloadButton({ candidateId, label = "Download" }: Props) {
         onClick={onClick}
         disabled={busy}
       >
-        {busy ? "Preparing…" : label}
+        {busy ? copy.preparing : label}
       </button>
       {error !== null ? <p className={styles.error}>{error}</p> : null}
     </span>

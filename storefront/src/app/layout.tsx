@@ -1,25 +1,25 @@
 import type { Metadata } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
+import { Manrope, Unbounded } from "next/font/google";
 import "./globals.css";
 
-const geistSans = Geist({
-  variable: "--font-geist-sans",
-  subsets: ["latin"],
+const manrope = Manrope({
+  variable: "--font-body",
+  subsets: ["latin", "cyrillic", "cyrillic-ext"],
 });
 
-const geistMono = Geist_Mono({
-  variable: "--font-geist-mono",
-  subsets: ["latin"],
+const unbounded = Unbounded({
+  variable: "--font-display",
+  subsets: ["latin", "cyrillic", "cyrillic-ext"],
 });
 
 export const metadata: Metadata = {
   title: "Proofbasket",
-  description: "Velmor shop — goods that passed the rights gate.",
+  description: "Лічбавыя тавары з праверанымі правамі на продаж",
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
-    <html lang="en" className={`${geistSans.variable} ${geistMono.variable}`}>
+    <html lang="be" className={`${manrope.variable} ${unbounded.variable}`}>
       <body>{children}</body>
     </html>
   );

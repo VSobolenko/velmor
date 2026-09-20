@@ -5,16 +5,19 @@
 }
 
 .header {
-  padding: 2.5rem 1.5rem 1.5rem;
-  background: #14161a;
-  color: #ffffff;
+  padding: 1.25rem 1.5rem 1rem;
+  background: var(--pb-slate-900);
+  color: #f5f7fa;
+  position: relative;
+  z-index: 2;
 }
 
 .brand {
   margin: 0;
-  font-size: 1.75rem;
-  font-weight: 650;
-  letter-spacing: -0.02em;
+  font-family: var(--font-display), var(--font-body), sans-serif;
+  font-size: 1.65rem;
+  font-weight: 700;
+  letter-spacing: -0.03em;
 }
 
 .brand a {
@@ -22,42 +25,129 @@
 }
 
 .tagline {
-  margin: 0.35rem 0 0;
-  color: #b9bfc9;
-  font-size: 0.95rem;
+  margin: 0.3rem 0 0;
+  color: var(--pb-slate-300);
+  font-size: 0.9rem;
 }
 
 .nav {
-  margin-top: 1rem;
+  margin-top: 0.9rem;
   display: flex;
-  gap: 1rem;
+  gap: 1.25rem;
   font-size: 0.9rem;
 }
 
 .nav a {
-  color: #b9bfc9;
+  color: var(--pb-slate-300);
+  position: relative;
+  padding-bottom: 0.15rem;
+  transition: color 0.2s ease;
+}
+
+.nav a::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  width: 100%;
+  height: 1px;
+  background: var(--pb-teal-600);
+  transform: scaleX(0);
+  transform-origin: left;
+  transition: transform 0.22s ease;
 }
 
 .nav a:hover {
   color: #ffffff;
 }
 
+.nav a:hover::after {
+  transform: scaleX(1);
+}
+
+.hero {
+  position: relative;
+  min-height: min(72vh, 34rem);
+  display: flex;
+  align-items: flex-end;
+  overflow: hidden;
+  background:
+    linear-gradient(160deg, var(--pb-slate-900) 0%, var(--pb-teal-800) 55%, var(--pb-slate-700) 100%);
+  color: #f5f7fa;
+  animation: heroFade 0.85s ease both;
+}
+
+.heroImage {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: center;
+}
+
+.heroOverlay {
+  position: absolute;
+  inset: 0;
+  background:
+    linear-gradient(
+      180deg,
+      rgba(15, 20, 25, 0.25) 0%,
+      rgba(15, 20, 25, 0.55) 45%,
+      rgba(15, 20, 25, 0.88) 100%
+    );
+}
+
+.heroContent {
+  position: relative;
+  z-index: 1;
+  width: 100%;
+  max-width: 44rem;
+  padding: 3.5rem 1.5rem 2.75rem;
+}
+
+.heroBrand {
+  margin: 0;
+  font-family: var(--font-display), var(--font-body), sans-serif;
+  font-size: clamp(2.4rem, 6vw, 3.4rem);
+  font-weight: 700;
+  letter-spacing: -0.04em;
+  line-height: 1.05;
+}
+
+.heroSupport {
+  margin: 0.85rem 0 0;
+  max-width: 28rem;
+  font-size: 1.05rem;
+  line-height: 1.45;
+  color: var(--pb-slate-200);
+}
+
+.heroActions {
+  margin-top: 1.5rem;
+}
+
 .main {
   padding: 2rem 1.5rem 3rem;
   max-width: 44rem;
   width: 100%;
+  flex: 1;
 }
 
 .heading {
   margin: 0 0 0.75rem;
-  font-size: 1.25rem;
-  font-weight: 600;
+  font-family: var(--font-display), var(--font-body), sans-serif;
+  font-size: 1.35rem;
+  font-weight: 650;
+  letter-spacing: -0.02em;
 }
 
 .subheading {
   margin: 1.75rem 0 0.75rem;
-  font-size: 1.05rem;
-  font-weight: 600;
+  font-family: var(--font-display), var(--font-body), sans-serif;
+  font-size: 1.1rem;
+  font-weight: 650;
+  letter-spacing: -0.015em;
 }
 
 .list {
@@ -68,35 +158,79 @@
 }
 
 .list a {
-  color: #1a5fb4;
+  color: var(--accent-strong);
+  transition: color 0.15s ease;
 }
 
 .list a:hover {
+  color: var(--accent);
   text-decoration: underline;
+}
+
+.categoryGrid {
+  list-style: none;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(11rem, 1fr));
+  gap: 0.85rem;
+}
+
+.categoryTile {
+  display: block;
+  border: 1px solid var(--pb-slate-200);
+  background: #ffffff;
+  overflow: hidden;
+  transition: border-color 0.2s ease, transform 0.2s ease;
+}
+
+.categoryTile:hover {
+  border-color: var(--pb-teal-600);
+  transform: translateY(-2px);
+}
+
+.categoryTileImage {
+  display: block;
+  width: 100%;
+  aspect-ratio: 4 / 3;
+  object-fit: cover;
+  background: var(--pb-slate-100);
+}
+
+.categoryBanner {
+  margin: 0 0 1.25rem;
+  overflow: hidden;
+  border: 1px solid var(--pb-slate-200);
+}
+
+.categoryBannerImage {
+  display: block;
+  width: 100%;
+  aspect-ratio: 16 / 7;
+  object-fit: cover;
+  background: var(--pb-slate-100);
 }
 
 .meta {
   margin: 0.25rem 0 0;
-  color: #626a76;
+  color: var(--pb-slate-500);
   font-size: 0.9rem;
 }
 
 .empty {
   margin: 0;
-  color: #626a76;
+  color: var(--pb-slate-500);
 }
 
 .status {
   margin: 0.5rem 0 0;
-  color: #626a76;
+  color: var(--pb-slate-500);
   font-size: 0.85rem;
-  font-family: var(--font-geist-mono), ui-monospace, monospace;
+  font-family: ui-monospace, "Cascadia Code", monospace;
 }
 
 .error {
   margin: 0;
-  color: #8a2f2f;
-  font-family: var(--font-geist-mono), ui-monospace, monospace;
+  color: var(--danger);
+  font-family: ui-monospace, "Cascadia Code", monospace;
 }
 
 .price {
@@ -110,7 +244,7 @@
   font-size: 0.74rem;
   text-transform: uppercase;
   letter-spacing: 0.07em;
-  color: #767d89;
+  color: var(--pb-slate-500);
 }
 
 .licenseValue {
@@ -132,8 +266,8 @@
 
 .button {
   appearance: none;
-  border: 1px solid #14161a;
-  background: #14161a;
+  border: 1px solid var(--pb-slate-900);
+  background: var(--pb-slate-900);
   color: #ffffff;
   padding: 0.55rem 1rem;
   font: inherit;
@@ -141,10 +275,12 @@
   cursor: pointer;
   text-decoration: none;
   display: inline-block;
+  transition: background 0.15s ease, border-color 0.15s ease;
 }
 
 .button:hover {
-  background: #2a3038;
+  background: var(--pb-teal-800);
+  border-color: var(--pb-teal-800);
 }
 
 .button:disabled {
@@ -153,7 +289,18 @@
 }
 
 .button:disabled:hover {
-  background: #14161a;
+  background: var(--pb-slate-900);
+  border-color: var(--pb-slate-900);
+}
+
+.buttonAccent {
+  border-color: var(--pb-teal-600);
+  background: var(--pb-teal-600);
+}
+
+.buttonAccent:hover {
+  background: var(--pb-teal-800);
+  border-color: var(--pb-teal-800);
 }
 
 .linkButton {
@@ -161,7 +308,7 @@
   border: none;
   background: none;
   padding: 0;
-  color: #1a5fb4;
+  color: var(--accent-strong);
   font: inherit;
   font-size: 0.95rem;
   cursor: pointer;
@@ -176,7 +323,8 @@
   flex-direction: column;
   gap: 0.35rem;
   padding-bottom: 0.75rem;
-  border-bottom: 1px solid #e4e6ea;
+  border-bottom: 1px solid var(--pb-slate-200);
+  animation: lineIn 0.35s ease both;
 }
 
 .cartControls {
@@ -190,14 +338,15 @@
   gap: 0.5rem;
   align-items: center;
   font-size: 0.9rem;
-  color: #626a76;
+  color: var(--pb-slate-500);
 }
 
 .qtyInput {
   width: 4rem;
   padding: 0.25rem 0.35rem;
   font: inherit;
-  border: 1px solid #c5c9d0;
+  border: 1px solid var(--pb-slate-300);
+  background: #ffffff;
 }
 
 .downloadControl {
@@ -219,7 +368,7 @@
   font-size: 0.74rem;
   text-transform: uppercase;
   letter-spacing: 0.07em;
-  color: #767d89;
+  color: var(--pb-slate-500);
 }
 
 .disclosureRow dd {
@@ -239,7 +388,7 @@
   padding: 0;
   margin-bottom: 0.5rem;
   font-size: 0.9rem;
-  color: #626a76;
+  color: var(--pb-slate-500);
 }
 
 .radioLabel {
@@ -247,4 +396,93 @@
   gap: 0.5rem;
   align-items: center;
   font-size: 0.95rem;
+}
+
+.footer {
+  margin-top: auto;
+  padding: 1.5rem 1.5rem 2rem;
+  border-top: 1px solid var(--pb-slate-200);
+  background: #ffffff;
+  max-width: 100%;
+}
+
+.footerBrand {
+  margin: 0 0 0.75rem;
+  font-family: var(--font-display), var(--font-body), sans-serif;
+  font-size: 0.95rem;
+  font-weight: 650;
+  color: var(--pb-slate-700);
+}
+
+.paymentMarks {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+}
+
+.paymentMarksLabel {
+  margin: 0;
+  font-size: 0.74rem;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: var(--pb-slate-500);
+}
+
+.paymentMarksList {
+  list-style: none;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+}
+
+.paymentMark {
+  display: inline-block;
+  padding: 0.28rem 0.55rem;
+  border: 1px solid var(--pb-slate-200);
+  background: var(--pb-slate-50);
+  color: var(--pb-slate-700);
+  font-size: 0.8rem;
+  letter-spacing: 0.02em;
+}
+
+.checkoutMarks {
+  margin: 1rem 0 0;
+}
+
+@keyframes heroFade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes lineIn {
+  from {
+    opacity: 0;
+    transform: translateY(0.35rem);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .hero {
+    animation: none;
+  }
+
+  .cartLine {
+    animation: none;
+  }
+
+  .categoryTile:hover {
+    transform: none;
+  }
+
+  .nav a::after {
+    transition: none;
+  }
 }

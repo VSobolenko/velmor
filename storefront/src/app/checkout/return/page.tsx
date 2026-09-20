@@ -8,6 +8,7 @@ import {
   CommerceApiError,
   type Order,
 } from "@/lib/api";
+import { copy } from "@/lib/copy";
 import styles from "../../shop.module.css";
 
 const ORDER_STORAGE_KEY = "velmor.checkout.order_id";
@@ -30,9 +31,9 @@ export default function CheckoutReturnPage() {
       .then((payload) => {
         setOrder(payload);
         if (payload.state === "pending") {
-          setStatusNote("This order is still pending provider confirmation.");
+          setStatusNote(copy.orderPending);
         } else {
-          setStatusNote(`Current order state: ${payload.state}.`);
+          setStatusNote(`${copy.orderState}: ${payload.state}.`);
         }
       })
       .catch((error: unknown) => {
@@ -41,39 +42,32 @@ export default function CheckoutReturnPage() {
             ? error.detail
             : error instanceof Error
               ? error.message
-              : "Could not load order";
+              : copy.couldNotLoadOrder;
         setStatusNote(detail);
       });
   }, []);
 
   return (
-    <div className={styles.page}>
-      <ShopChrome tagline="Payment return" />
+    <ShopChrome tagline={copy.paymentReturn}>
       <main className={styles.main}>
-        <h1 className={styles.heading}>Back from payment</h1>
-        <p className={styles.meta}>
-          Payment confirmation comes from the provider. This page does not mark
-          the order paid.
-        </p>
+        <h1 className={styles.heading}>{copy.backFromPayment}</h1>
+        <p className={styles.meta}>{copy.returnNotice}</p>
         {statusNote !== null ? <p className={styles.status}>{statusNote}</p> : null}
         <p className={styles.status}>
-          <Link href="/account/orders">View orders</Link>
+          <Link href="/account/orders">{copy.viewOrders}</Link>
           {orderId !== null ? (
             <>
               {" · "}
               <Link href={`/account/orders/${encodeURIComponent(orderId)}`}>
-                Order {orderId}
+                {copy.order} {orderId}
               </Link>
             </>
           ) : null}
         </p>
         {order !== null && order.state === "paid" ? (
-          <p className={styles.meta}>
-            The provider already confirmed this order as paid. Downloads are on
-            the order page.
-          </p>
+          <p className={styles.meta}>{copy.orderPaidDownloads}</p>
         ) : null}
       </main>
-    </div>
+    </ShopChrome>
   );
 }

@@ -6,6 +6,7 @@ import {
   CommerceApiError,
   type Entitlement,
 } from "@/lib/api";
+import { copy } from "@/lib/copy";
 import styles from "../../shop.module.css";
 
 export const dynamic = "force-dynamic";
@@ -49,22 +50,21 @@ export default async function EntitlementsPage() {
     } else if (error instanceof Error) {
       data = { kind: "error", message: error.message };
     } else {
-      data = { kind: "error", message: "entitlements unavailable" };
+      data = { kind: "error", message: copy.entitlementsUnavailable };
     }
   }
 
   return (
-    <div className={styles.page}>
-      <ShopChrome tagline="Entitlements" />
+    <ShopChrome tagline={copy.entitlements}>
       <main className={styles.main}>
-        <h1 className={styles.heading}>Entitlements</h1>
+        <h1 className={styles.heading}>{copy.entitlements}</h1>
         <p className={styles.status}>
-          <Link href="/account">Back to account</Link>
+          <Link href="/account">{copy.backToAccount}</Link>
         </p>
         {data.kind === "error" ? (
           <p className={styles.error}>{data.message}</p>
         ) : data.rows.length === 0 ? (
-          <p className={styles.empty}>No entitlements yet.</p>
+          <p className={styles.empty}>{copy.noEntitlements}</p>
         ) : (
           <ul className={styles.list}>
             {data.rows.map(({ entitlement, title }) => {
@@ -82,9 +82,9 @@ export default async function EntitlementsPage() {
                   <p className={styles.meta}>
                     {entitlement.state}
                     {entitlement.order_id !== ""
-                      ? ` · order ${entitlement.order_id}`
+                      ? ` · ${copy.orderWord} ${entitlement.order_id}`
                       : ""}
-                    {` · granted ${entitlement.granted_at}`}
+                    {` · ${copy.granted} ${entitlement.granted_at}`}
                   </p>
                   {isActive ? (
                     <div className={styles.actions}>
@@ -94,11 +94,11 @@ export default async function EntitlementsPage() {
                     </div>
                   ) : (
                     <p className={styles.empty}>
-                      Revoked
+                      {copy.revoked}
                       {entitlement.revocation_reason !== undefined
                         ? `: ${entitlement.revocation_reason}`
                         : ""}
-                      . No download.
+                      . {copy.noDownload}
                     </p>
                   )}
                 </li>
@@ -107,6 +107,6 @@ export default async function EntitlementsPage() {
           </ul>
         )}
       </main>
-    </div>
+    </ShopChrome>
   );
 }
