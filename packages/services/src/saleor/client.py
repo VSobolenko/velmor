@@ -464,7 +464,12 @@ class SaleorClient:
         data = await self._execute(
             'create_variant',
             self.PRODUCT_VARIANT_CREATE_MUTATION,
-            {'input': {'product': product_id, 'sku': sku}},
+            {
+                # Saleor 3.22 requires ``attributes`` on ProductVariantCreateInput
+                # even when the product type defines none; an empty list is the
+                # no-attribute case.
+                'input': {'product': product_id, 'sku': sku, 'attributes': []},
+            },
             ProductVariantCreateData,
         )
         entity = self._accepted_entity('create_variant', data.productVariantCreate)

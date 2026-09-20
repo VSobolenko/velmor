@@ -360,4 +360,6 @@ class PublicationBridge:
     @staticmethod
     def _sku_for(candidate_id: str) -> str:
         # Deterministic from candidate.id so a title rename cannot orphan the SKU.
-        return f'sku-{candidate_id}'.lower()
+        # Colons in source-qualified ids are replaced so the SKU stays printable.
+        safe = candidate_id.replace(':', '-').lower()
+        return f'sku-{safe}'

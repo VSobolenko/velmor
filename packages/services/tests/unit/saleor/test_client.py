@@ -263,7 +263,9 @@ class TestTheEightOperations:
 
         assert variant == SaleorVariant(variant_id=VARIANT_ID)
         body = assert_graphql_request(stub.requests[0], 'productVariantCreate')
-        assert body['variables'] == {'input': {'product': PRODUCT_ID, 'sku': 'LANTERN-1'}}
+        assert body['variables'] == {
+            'input': {'product': PRODUCT_ID, 'sku': 'LANTERN-1', 'attributes': []},
+        }
 
     async def test_update_variant_returns_the_variant_id(self) -> None:
         stub = StubTransport(VARIANT_UPDATED)
