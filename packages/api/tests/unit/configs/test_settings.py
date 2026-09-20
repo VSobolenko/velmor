@@ -28,6 +28,7 @@ class TestCommerceSettings:
         'BEPAID_SHOP_ID': 'bepaid-shop-id-literal',
         'BEPAID_SECRET_KEY': 'bepaid-secret-key-literal',
         'STOREFRONT_DOMAIN': 'shop.example.test',
+        'DELIVERY_GRANT_SECRET': 'delivery-grant-secret-literal',
         'DELIVERY_GRANT_LIFETIME_SECONDS': '900',
         'DELIVERY_CACHE_MAX_BYTES': '268435456',
         'DELIVERY_CACHE_DIR': 'var/delivery-cache',
@@ -38,6 +39,7 @@ class TestCommerceSettings:
         'stripe_secret_key': 'STRIPE_SECRET_KEY',
         'stripe_webhook_signing_secret': 'STRIPE_WEBHOOK_SIGNING_SECRET',
         'bepaid_secret_key': 'BEPAID_SECRET_KEY',
+        'delivery_grant_secret': 'DELIVERY_GRANT_SECRET',
     }
 
     @pytest.mark.parametrize('variable', tuple(COMMERCE_VALUES))

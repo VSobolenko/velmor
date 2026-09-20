@@ -27,6 +27,9 @@ class CommerceSettings(PlatformSettings):
         self.bepaid_shop_id: str = loader.required_str('BEPAID_SHOP_ID')
         self.bepaid_secret_key: SecretStr = loader.required_secret('BEPAID_SECRET_KEY')
         self.storefront_domain: str = loader.required_str('STOREFRONT_DOMAIN')
+        self.delivery_grant_secret: SecretStr = loader.required_secret(
+            'DELIVERY_GRANT_SECRET'
+        )
         self.delivery_grant_lifetime_seconds: int = loader.required_int(
             'DELIVERY_GRANT_LIFETIME_SECONDS'
         )

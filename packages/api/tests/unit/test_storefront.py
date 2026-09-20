@@ -1,13 +1,25 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime
+from pathlib import Path
+
+import httpx
 from fastapi.testclient import TestClient
+from pydantic import SecretStr
 
 from packages.api.src.app import ApiApplication, StorefrontPage
+from packages.services.src.commerce.asset_cache import AssetCache
+from packages.services.src.commerce.delivery import DeliveryService
+from packages.services.src.commerce.grants import DeliveryGrantService
 from packages.services.src.domain.candidate import Candidate
 from packages.services.src.domain.rights import RightsRecord
+from packages.services.src.persistence.memory import InMemoryStore
 from packages.services.tests.conftest import build_candidate, build_record
 
 Good = tuple[Candidate, RightsRecord]
+
+_GRANT_SECRET = SecretStr('storefront-unit-grant-secret')
+_NOW = datetime(2026, 9, 20, 12, 0, tzinfo=UTC)
 
 
 class FakeCatalog:
@@ -30,7 +42,24 @@ def build_client(
     goods: tuple[Good, ...] = (), total: int | None = None
 ) -> tuple[TestClient, FakeCatalog]:
     catalog = FakeCatalog(goods, total)
-    return TestClient(ApiApplication('test', catalog).build()), catalog
+    store = InMemoryStore()
+    cache = AssetCache(root=Path('var/test-storefront-cache'), max_bytes=1024)
+    http = httpx.AsyncClient(
+        transport=httpx.MockTransport(lambda _request: httpx.Response(404))
+    )
+    delivery = DeliveryService(
+        entitlements=store, entries=store, cache=cache, http=http
+    )
+    grants = DeliveryGrantService(secret=_GRANT_SECRET, lifetime_seconds=900)
+    app = ApiApplication(
+        'test',
+        catalog,
+        grants=grants,
+        delivery=delivery,
+        entitlements=store,
+        clock=lambda: _NOW,
+    ).build()
+    return TestClient(app), catalog
 
 
 def build_good(**overrides: object) -> Good:

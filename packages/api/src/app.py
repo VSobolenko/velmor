@@ -9,16 +9,24 @@ markup, because those strings are written by strangers.
 
 from __future__ import annotations
 
+from collections.abc import Callable
+from contextlib import AbstractAsyncContextManager
+from datetime import UTC, datetime
 from html import escape
 
-from fastapi import FastAPI
-from fastapi.responses import HTMLResponse
+from fastapi import FastAPI, Request
+from fastapi.responses import HTMLResponse, JSONResponse, Response
 
+from packages.services.src.commerce.delivery import DeliveryService
+from packages.services.src.commerce.errors import DeliveryRefusedError, GrantRefusedError
+from packages.services.src.commerce.grants import DeliveryGrantService
 from packages.services.src.domain.candidate import Candidate
+from packages.services.src.domain.entitlement import EntitlementState
 from packages.services.src.domain.rights import RightsRecord
-from packages.services.src.persistence.contract import StorefrontCatalog
+from packages.services.src.persistence.contract import EntitlementRepository, StorefrontCatalog
 
 Good = tuple[Candidate, RightsRecord]
+Lifespan = Callable[[FastAPI], AbstractAsyncContextManager[None]]
 
 
 class StorefrontPage:
@@ -195,10 +203,25 @@ class ApiApplication:
     """
 
     CATALOGUE_LIMIT = 100
+    BUYER_HEADER = 'x-buyer-id'
 
-    def __init__(self, environment: str, catalog: StorefrontCatalog) -> None:
+    def __init__(
+        self,
+        environment: str,
+        catalog: StorefrontCatalog,
+        grants: DeliveryGrantService,
+        delivery: DeliveryService,
+        entitlements: EntitlementRepository,
+        clock: Callable[[], datetime],
+        lifespan: Lifespan | None = None,
+    ) -> None:
         self._environment = environment
         self._catalog = catalog
+        self._grants = grants
+        self._delivery = delivery
+        self._entitlements = entitlements
+        self._clock = clock
+        self._lifespan = lifespan
         self._page = StorefrontPage()
 
     def build(self) -> FastAPI:
@@ -207,11 +230,18 @@ class ApiApplication:
             docs_url=None,
             redoc_url=None,
             openapi_url=None,
+            lifespan=self._lifespan,
         )
         app.add_api_route('/health', self._health, methods=['GET'])
         app.add_api_route(
             '/', self._storefront, methods=['GET'], response_class=HTMLResponse
         )
+        app.add_api_route(
+            '/account/goods/{candidate_id}/grant',
+            self._issue_grant,
+            methods=['POST'],
+        )
+        app.add_api_route('/downloads/{token}', self._download, methods=['GET'])
         return app
 
     async def _health(self) -> dict[str, str]:
@@ -221,3 +251,72 @@ class ApiApplication:
         goods = await self._catalog.published(self.CATALOGUE_LIMIT)
         total = await self._catalog.published_count()
         return HTMLResponse(self._page.render(goods, total))
+
+    async def _issue_grant(self, candidate_id: str, request: Request) -> JSONResponse:
+        """Issue a short-lived download grant for an entitled buyer.
+
+        Buyer identity is taken from the temporary ``X-Buyer-Id`` header until
+        account auth lands in task 5.5; that task must replace this stand-in and
+        extend this wiring rather than rewrite the grant routes.
+        """
+        buyer_id = self._require_buyer_id(request)
+        if buyer_id is None:
+            return JSONResponse(
+                {'detail': 'missing or empty X-Buyer-Id header'},
+                status_code=401,
+            )
+        rows = await self._entitlements.for_buyer_candidate(buyer_id, candidate_id)
+        if not any(row.state is EntitlementState.ACTIVE for row in rows):
+            return JSONResponse(
+                {'detail': 'no active entitlement for this good'},
+                status_code=403,
+            )
+        token, grant = self._grants.issue(buyer_id, candidate_id, self._clock())
+        return JSONResponse(
+            {
+                'token': token,
+                'expires_at': self._format_instant(grant.expires_at),
+            }
+        )
+
+    async def _download(self, token: str, request: Request) -> Response:
+        """Serve bytes for a verified grant.
+
+        Buyer identity is taken from the temporary ``X-Buyer-Id`` header until
+        account auth lands in task 5.5.
+        """
+        buyer_id = self._require_buyer_id(request)
+        if buyer_id is None:
+            return JSONResponse(
+                {'detail': 'missing or empty X-Buyer-Id header'},
+                status_code=401,
+            )
+        # GrantRefusedError / DeliveryRefusedError are the documented refusal
+        # contracts of the grant and delivery services; mapping them to HTTP is
+        # the route's job (task 4.3 R4 / R6).
+        try:
+            grant = self._grants.verify(token, buyer_id, self._clock())
+        except GrantRefusedError as error:
+            return JSONResponse({'detail': str(error)}, status_code=403)
+        try:
+            result = await self._delivery.deliver(buyer_id, grant.candidate_id)
+        except DeliveryRefusedError as error:
+            return JSONResponse({'detail': str(error)}, status_code=403)
+        filename = f'{grant.candidate_id}.bin'
+        return Response(
+            content=result.payload,
+            media_type='application/octet-stream',
+            headers={'Content-Disposition': f'attachment; filename="{filename}"'},
+        )
+
+    def _require_buyer_id(self, request: Request) -> str | None:
+        if self.BUYER_HEADER not in request.headers:
+            return None
+        buyer_id = request.headers[self.BUYER_HEADER]
+        if buyer_id == '':
+            return None
+        return buyer_id
+
+    @staticmethod
+    def _format_instant(instant: datetime) -> str:
+        return instant.astimezone(UTC).isoformat().replace('+00:00', 'Z')

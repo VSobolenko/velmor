@@ -41,3 +41,7 @@ class AssetCacheError(VelmorError):
 
 class DeliveryRefusedError(VelmorError):
     """Delivery refused; the message is safe to show a buyer (no origin URL)."""
+
+
+class GrantRefusedError(VelmorError):
+    """A delivery grant was refused; the message must not leak the secret or token."""
