@@ -67,6 +67,7 @@ def published_entry(
         withdrawal_reason=None,
         published_at=EARLIER,
         content_digest='00' * 32,
+        origin_url='https://openverse.test/items/openverse:1.bin',
     )
 
 
@@ -84,6 +85,7 @@ def withdrawn_entry(candidate_id: str = 'openverse:1') -> CatalogueEntry:
         withdrawal_reason='withdrawn for test',
         published_at=EARLIER,
         content_digest='00' * 32,
+        origin_url='https://openverse.test/items/openverse:1.bin',
     )
 
 

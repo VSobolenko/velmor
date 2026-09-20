@@ -37,3 +37,7 @@ class DigestUnavailableError(VelmorError):
 
 class AssetCacheError(VelmorError):
     """The small-file cache refused or could not complete an operation."""
+
+
+class DeliveryRefusedError(VelmorError):
+    """Delivery refused; the message is safe to show a buyer (no origin URL)."""

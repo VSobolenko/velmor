@@ -65,6 +65,7 @@ def build_entry(
         withdrawal_reason=withdrawal_reason,
         published_at=published_at,
         content_digest='00' * 32,
+        origin_url='https://openverse.test/items/openverse:1.bin',
     )
 
 

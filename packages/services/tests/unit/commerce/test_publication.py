@@ -166,6 +166,7 @@ def published_entry(
         withdrawal_reason=None,
         published_at=published_at,
         content_digest=FIXTURE_DIGEST,
+        origin_url='https://openverse.test/items/openverse:1.bin',
     )
 
 
@@ -186,6 +187,7 @@ def withdrawn_entry(
         withdrawal_reason=reason,
         published_at=EARLIER,
         content_digest=FIXTURE_DIGEST,
+        origin_url='https://openverse.test/items/openverse:1.bin',
     )
 
 
@@ -253,6 +255,7 @@ class TestPublicationBridge:
         assert outcome.entry.withdrawal_reason is None
         assert outcome.entry.category_id is None
         assert outcome.entry.content_digest == REAL_DIGEST
+        assert outcome.entry.origin_url == candidate.download_url
         assert await store.by_candidate(candidate.id) == outcome.entry
         assert [call[0] for call in saleor.calls] == [
             'ensure_product_type',

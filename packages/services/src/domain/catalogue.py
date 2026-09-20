@@ -34,6 +34,11 @@ class CatalogueEntry(BaseModel):
     publication. An entry without a digest is not representable: delivery
     verifies against it, so deny-by-default forbids publishing without one.
 
+    ``origin_url`` is the internal locator the delivery service fetches from.
+    It is never exposed on a buyer-facing result, DTO, or error message; only
+    the bridge and delivery path may read it. An entry without an origin cannot
+    be delivered, so deny-by-default forbids representing one.
+
     ``category_id``, ``license_id`` and ``withdrawal_reason`` are optional
     because each is absent until the operation that sets it runs: a good may be
     published before it is categorised, a record may carry no resolved licence
@@ -54,3 +59,4 @@ class CatalogueEntry(BaseModel):
     withdrawal_reason: str | None = None
     published_at: datetime
     content_digest: str
+    origin_url: str

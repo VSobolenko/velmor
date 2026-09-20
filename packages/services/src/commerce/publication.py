@@ -225,6 +225,7 @@ class PublicationBridge:
             withdrawal_reason=None,
             published_at=now,
             content_digest=digest.digest,
+            origin_url=candidate.download_url,
         )
         await self._entries.save_entry(entry)
         return PublicationOutcome(
@@ -264,6 +265,7 @@ class PublicationBridge:
             withdrawal_reason=None,
             published_at=existing.published_at,
             content_digest=digest.digest,
+            origin_url=candidate.download_url,
         )
         await self._entries.save_entry(entry)
         return PublicationOutcome(
@@ -303,6 +305,7 @@ class PublicationBridge:
             withdrawal_reason=None,
             published_at=existing.published_at,
             content_digest=digest.digest,
+            origin_url=candidate.download_url,
         )
         await self._entries.save_entry(entry)
         return PublicationOutcome(
@@ -328,6 +331,7 @@ class PublicationBridge:
             withdrawal_reason=reason,
             published_at=existing.published_at,
             content_digest=existing.content_digest,
+            origin_url=existing.origin_url,
         )
         await self._entries.save_entry(entry)
         return PublicationOutcome(

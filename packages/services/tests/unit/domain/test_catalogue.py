@@ -25,6 +25,7 @@ def build_entry(
     withdrawal_reason: str | None = None,
     published_at: datetime = PUBLISHED_AT,
     content_digest: str = FIXTURE_DIGEST,
+    origin_url: str = 'https://origin.test/asset.bin',
 ) -> CatalogueEntry:
     return CatalogueEntry(
         candidate_id=candidate_id,
@@ -39,6 +40,7 @@ def build_entry(
         withdrawal_reason=withdrawal_reason,
         published_at=published_at,
         content_digest=content_digest,
+        origin_url=origin_url,
     )
 
 
@@ -67,6 +69,7 @@ class TestCatalogueEntry:
         assert entry.state is CatalogueEntryState.PUBLISHED
         assert entry.published_at == PUBLISHED_AT
         assert entry.content_digest == FIXTURE_DIGEST
+        assert entry.origin_url == 'https://origin.test/asset.bin'
 
     def test_the_optional_fields_default_to_none(self) -> None:
         entry = CatalogueEntry(
@@ -79,6 +82,7 @@ class TestCatalogueEntry:
             state=CatalogueEntryState.PUBLISHED,
             published_at=PUBLISHED_AT,
             content_digest=FIXTURE_DIGEST,
+            origin_url='https://origin.test/asset.bin',
         )
 
         assert entry.category_id is None
@@ -136,6 +140,21 @@ class TestCatalogueEntry:
                 listing=StorefrontListing.PAID_OK,
                 state=CatalogueEntryState.PUBLISHED,
                 published_at=PUBLISHED_AT,
+                origin_url='https://origin.test/asset.bin',
+            )
+
+    def test_a_missing_origin_url_is_rejected(self) -> None:
+        with pytest.raises(ValidationError):
+            CatalogueEntry(
+                candidate_id='openverse:1',
+                source_id='openverse',
+                saleor_product_id='UHJvZHVjdDox',
+                saleor_variant_id='UHJvZHVjdFZhcmlhbnQ6MQ==',
+                obligations=(),
+                listing=StorefrontListing.PAID_OK,
+                state=CatalogueEntryState.PUBLISHED,
+                published_at=PUBLISHED_AT,
+                content_digest=FIXTURE_DIGEST,
             )
 
     def test_an_entry_is_frozen(self) -> None:
