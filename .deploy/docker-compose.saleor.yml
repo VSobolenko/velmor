@@ -1,0 +1,93 @@
+# Saleor overlay for the Velmor host.
+# Reuses existing velmor-postgres / velmor-redis (no second DB/cache containers).
+# Network: attach to the running compose project network `velmor_default`.
+#
+# From /opt/velmor:
+#   docker compose -p velmor-saleor -f docker-compose.saleor.yml --env-file saleor.env up -d
+#
+# See .deploy/saleor-README.md
+
+name: velmor-saleor
+
+services:
+  saleor-api:
+    image: ghcr.io/saleor/saleor:3.22.66
+    container_name: velmor-saleor-api
+    restart: unless-stopped
+    env_file:
+      - saleor.env
+    ports:
+      - '127.0.0.1:8001:8000'
+    volumes:
+      - saleor-media:/app/media
+    networks:
+      - velmor_default
+    deploy:
+      resources:
+        limits:
+          cpus: '1.00'
+          memory: 768M
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: '3'
+    healthcheck:
+      test: ['CMD-SHELL', 'python -c "import urllib.request; urllib.request.urlopen(\"http://127.0.0.1:8000/health/\")"']
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+
+  saleor-worker:
+    image: ghcr.io/saleor/saleor:3.22.66
+    container_name: velmor-saleor-worker
+    restart: unless-stopped
+    command: >
+      celery --app saleor.celeryconf:app worker
+      --loglevel=info -B --concurrency=1
+    env_file:
+      - saleor.env
+    volumes:
+      - saleor-media:/app/media
+    networks:
+      - velmor_default
+    deploy:
+      resources:
+        limits:
+          cpus: '0.50'
+          memory: 384M
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: '3'
+
+  saleor-dashboard:
+    image: ghcr.io/saleor/saleor-dashboard:3.22.66
+    container_name: velmor-saleor-dashboard
+    restart: unless-stopped
+    environment:
+      API_URL: ${SALEOR_DASHBOARD_API_URL:-http://127.0.0.1:8001/graphql/}
+    ports:
+      - '127.0.0.1:9000:80'
+    networks:
+      - velmor_default
+    deploy:
+      resources:
+        limits:
+          cpus: '0.25'
+          memory: 256M
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: '3'
+
+volumes:
+  saleor-media:
+
+networks:
+  velmor_default:
+    external: true
+    name: velmor_default
