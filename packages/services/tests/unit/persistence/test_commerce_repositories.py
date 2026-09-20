@@ -14,6 +14,7 @@ from packages.services.src.persistence.contract import (
     CatalogueEntryRepository,
     CategoryRepository,
     EntitlementRepository,
+    OrderRepository,
     SellerDisclosureRepository,
 )
 from packages.services.src.persistence.memory import InMemoryStore
@@ -436,6 +437,7 @@ class TestRepositoryConformance:
         assert isinstance(store, CategoryRepository)
         assert isinstance(store, EntitlementRepository)
         assert isinstance(store, SellerDisclosureRepository)
+        assert isinstance(store, OrderRepository)
 
     async def test_the_postgres_store_satisfies_every_commerce_protocol(self) -> None:
         engine = create_async_engine(UNCONNECTED_DSN)
@@ -445,6 +447,7 @@ class TestRepositoryConformance:
         assert isinstance(store, CategoryRepository)
         assert isinstance(store, EntitlementRepository)
         assert isinstance(store, SellerDisclosureRepository)
+        assert isinstance(store, OrderRepository)
 
         await engine.dispose()
 

@@ -45,3 +45,7 @@ class DeliveryRefusedError(VelmorError):
 
 class GrantRefusedError(VelmorError):
     """A delivery grant was refused; the message must not leak the secret or token."""
+
+
+class CheckoutRefusedError(VelmorError):
+    """Checkout refused payment; the message names the good or missing disclosure."""

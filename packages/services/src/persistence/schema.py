@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from sqlalchemy import BigInteger, Boolean, Column, DateTime, MetaData, Table, Text, func
+from sqlalchemy import BigInteger, Boolean, Column, DateTime, Index, MetaData, Table, Text, func
 from sqlalchemy.dialects.postgresql import JSONB
 
 
@@ -89,4 +89,24 @@ class Schema:
         metadata,
         Column('id', Text, primary_key=True),
         Column('disclosure', JSONB, nullable=False),
+    )
+
+    orders = Table(
+        'orders',
+        metadata,
+        Column('order_id', Text, primary_key=True),
+        Column('buyer_id', Text, nullable=False, index=True),
+        Column('state', Text, nullable=False),
+        Column('provider_id', Text, nullable=True),
+        Column('provider_reference', Text, nullable=True),
+        Column('created_at', DateTime(timezone=True), nullable=False),
+        Column('order', JSONB, nullable=False),
+    )
+
+    Index(
+        'uq_orders_provider_reference',
+        orders.c.provider_id,
+        orders.c.provider_reference,
+        unique=True,
+        postgresql_where=orders.c.provider_reference.isnot(None),
     )

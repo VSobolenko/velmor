@@ -7,6 +7,7 @@ from packages.services.src.domain.catalogue import CatalogueEntry
 from packages.services.src.domain.category import Category
 from packages.services.src.domain.entitlement import Entitlement
 from packages.services.src.domain.gate import GateDecision
+from packages.services.src.domain.order import Order
 from packages.services.src.domain.rights import RightsRecord
 from packages.services.src.domain.seller import SellerDisclosure
 
@@ -188,4 +189,34 @@ class SellerDisclosureRepository(Protocol):
         ``None`` is the row that does not exist yet, which the completeness
         check reports as every item missing. It is not an empty disclosure.
         """
+        ...
+
+
+@runtime_checkable
+class OrderRepository(Protocol):
+    """Storage for checkout orders.
+
+    ``save_order`` upserts by ``order_id``. Provider correlation uses
+    ``by_provider_reference`` when a notification arrives. Uniqueness of
+    ``(provider_id, provider_reference)`` when the reference is set is a store
+    invariant: Postgres uses a partial unique index; InMemory enforces it on
+    write. The write method is named ``save_order`` rather than ``save`` because
+    ``RightsRecordRepository.save`` already holds that name on both stores.
+    ``by_id`` shares its name with ``CategoryRepository.by_id``; the combined
+    store looks up orders then categories so both protocols keep the brief's
+    name.
+    """
+
+    async def save_order(self, order: Order) -> None:
+        """Store the order, replacing any earlier one with the same id."""
+        ...
+
+    async def by_id(self, order_id: str) -> Order | None:
+        """The order with this id, or ``None`` if it does not exist."""
+        ...
+
+    async def by_provider_reference(
+        self, provider_id: str, provider_reference: str
+    ) -> Order | None:
+        """The order correlated with this provider payment id, or ``None``."""
         ...

@@ -7,6 +7,7 @@ from packages.services.src.domain.catalogue import CatalogueEntry
 from packages.services.src.domain.category import Category
 from packages.services.src.domain.entitlement import Entitlement
 from packages.services.src.domain.gate import GateDecision
+from packages.services.src.domain.order import Order
 from packages.services.src.domain.rights import RightsRecord
 from packages.services.src.domain.seller import SellerDisclosure
 from packages.services.src.persistence.contract import SELLER_DISCLOSURE_KEY
@@ -35,6 +36,8 @@ class InMemoryStore:
         self._categories: dict[str, Category] = {}
         self._entitlements: dict[tuple[str, str], Entitlement] = {}
         self._disclosures: dict[str, SellerDisclosure] = {}
+        self._orders: dict[str, Order] = {}
+        self._orders_by_provider_ref: dict[tuple[str, str], str] = {}
 
     async def upsert_many(self, candidates: tuple[Candidate, ...]) -> int:
         written = 0
@@ -87,8 +90,14 @@ class InMemoryStore:
     async def save_category(self, category: Category) -> None:
         self._categories[category.category_id] = category
 
-    async def by_id(self, category_id: str) -> Category | None:
-        return self._categories.get(category_id)
+    async def by_id(self, entity_id: str) -> Category | Order | None:
+        # CategoryRepository and OrderRepository both name this method ``by_id``.
+        # One store implements both protocols, so one method serves both tables;
+        # the id namespaces do not overlap (category ids vs order uuids).
+        order = self._orders.get(entity_id)
+        if order is not None:
+            return order
+        return self._categories.get(entity_id)
 
     async def by_slug(self, slug: str) -> Category | None:
         for category in self._categories.values():
@@ -132,6 +141,38 @@ class InMemoryStore:
 
     async def current(self) -> SellerDisclosure | None:
         return self._disclosures.get(SELLER_DISCLOSURE_KEY)
+
+    async def save_order(self, order: Order) -> None:
+        previous = self._orders.get(order.order_id)
+        if previous is not None:
+            self._drop_provider_index(previous)
+        if order.provider_id is not None and order.provider_reference is not None:
+            key = (order.provider_id, order.provider_reference)
+            existing_id = self._orders_by_provider_ref.get(key)
+            if existing_id is not None and existing_id != order.order_id:
+                raise ValueError(
+                    f'provider reference already used by order {existing_id}'
+                )
+            self._orders_by_provider_ref[key] = order.order_id
+        self._orders[order.order_id] = order
+
+    async def by_provider_reference(
+        self, provider_id: str, provider_reference: str
+    ) -> Order | None:
+        order_id = self._orders_by_provider_ref.get((provider_id, provider_reference))
+        if order_id is None:
+            return None
+        return self._orders.get(order_id)
+
+    def order_ids(self) -> tuple[str, ...]:
+        return tuple(self._orders)
+
+    def _drop_provider_index(self, order: Order) -> None:
+        if order.provider_id is None or order.provider_reference is None:
+            return
+        key = (order.provider_id, order.provider_reference)
+        if self._orders_by_provider_ref.get(key) == order.order_id:
+            del self._orders_by_provider_ref[key]
 
     @staticmethod
     def _in_catalogue_order(entries: Iterable[CatalogueEntry]) -> tuple[CatalogueEntry, ...]:

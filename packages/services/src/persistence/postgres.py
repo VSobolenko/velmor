@@ -9,6 +9,7 @@ from packages.services.src.domain.catalogue import CatalogueEntry
 from packages.services.src.domain.category import Category
 from packages.services.src.domain.entitlement import Entitlement
 from packages.services.src.domain.gate import GateDecision
+from packages.services.src.domain.order import Order
 from packages.services.src.domain.rights import RightsRecord
 from packages.services.src.domain.seller import SellerDisclosure
 from packages.services.src.persistence.contract import SELLER_DISCLOSURE_KEY
@@ -233,15 +234,26 @@ class PostgresStore:
             await session.execute(statement)
             await session.commit()
 
-    async def by_id(self, category_id: str) -> Category | None:
-        statement = select(Schema.categories.c.category).where(
-            Schema.categories.c.category_id == category_id
+    async def by_id(self, entity_id: str) -> Category | Order | None:
+        # CategoryRepository and OrderRepository both name this method ``by_id``.
+        # One store implements both protocols, so one method serves both tables;
+        # the id namespaces do not overlap (category ids vs order uuids).
+        order_statement = select(Schema.orders.c.order).where(
+            Schema.orders.c.order_id == entity_id
+        )
+        category_statement = select(Schema.categories.c.category).where(
+            Schema.categories.c.category_id == entity_id
         )
         async with self._session_factory() as session:
-            row = (await session.execute(statement)).mappings().one_or_none()
-        if row is None:
+            order_row = (await session.execute(order_statement)).mappings().one_or_none()
+            if order_row is not None:
+                return Order.model_validate(order_row['order'])
+            category_row = (
+                await session.execute(category_statement)
+            ).mappings().one_or_none()
+        if category_row is None:
             return None
-        return Category.model_validate(row['category'])
+        return Category.model_validate(category_row['category'])
 
     async def by_slug(self, slug: str) -> Category | None:
         statement = select(Schema.categories.c.category).where(
@@ -355,6 +367,47 @@ class PostgresStore:
         if row is None:
             return None
         return SellerDisclosure.model_validate(row['disclosure'])
+
+    async def save_order(self, order: Order) -> None:
+        statement = (
+            insert(Schema.orders)
+            .values(
+                order_id=order.order_id,
+                buyer_id=order.buyer_id,
+                state=order.state.value,
+                provider_id=order.provider_id,
+                provider_reference=order.provider_reference,
+                created_at=order.created_at,
+                order=order.model_dump(mode='json'),
+            )
+            .on_conflict_do_update(
+                index_elements=['order_id'],
+                set_={
+                    'buyer_id': order.buyer_id,
+                    'state': order.state.value,
+                    'provider_id': order.provider_id,
+                    'provider_reference': order.provider_reference,
+                    'created_at': order.created_at,
+                    'order': order.model_dump(mode='json'),
+                },
+            )
+        )
+        async with self._session_factory() as session:
+            await session.execute(statement)
+            await session.commit()
+
+    async def by_provider_reference(
+        self, provider_id: str, provider_reference: str
+    ) -> Order | None:
+        statement = select(Schema.orders.c.order).where(
+            Schema.orders.c.provider_id == provider_id,
+            Schema.orders.c.provider_reference == provider_reference,
+        )
+        async with self._session_factory() as session:
+            row = (await session.execute(statement)).mappings().one_or_none()
+        if row is None:
+            return None
+        return Order.model_validate(row['order'])
 
     @staticmethod
     def _row_for(candidate: Candidate) -> dict:
