@@ -56,6 +56,7 @@ pem = subprocess.check_output(["openssl", "genrsa", "2048"], stderr=subprocess.D
 # One-line PEM with literal \n for django-environ
 rsa_one_line = pem.strip().replace("\n", "\\n")
 db_url = "postgres://velmor:%s@postgres:5432/saleor" % urllib.parse.quote(pg_pass, safe="")
+# Docker Compose expands \n inside double-quoted env values into real newlines.
 lines = [
     "SECRET_KEY=%s" % secret,
     "DEBUG=False",
@@ -69,7 +70,7 @@ lines = [
     "DATABASE_URL=%s" % db_url,
     "CACHE_URL=redis://redis:6379/1",
     "CELERY_BROKER_URL=redis://redis:6379/1",
-    "RSA_PRIVATE_KEY=%s" % rsa_one_line,
+    'RSA_PRIVATE_KEY="%s"' % rsa_one_line,
     "SALEOR_DASHBOARD_API_URL=http://127.0.0.1:8001/graphql/",
     "SALEOR_SUPERUSER_EMAIL=admin@velmor.local",
     "SALEOR_SUPERUSER_PASSWORD=%s" % super_pass,
