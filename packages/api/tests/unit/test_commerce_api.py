@@ -16,12 +16,13 @@ from packages.api.src.app import ApiApplication
 from packages.services.src.commerce.asset_cache import AssetCache
 from packages.services.src.commerce.checkout import CheckoutService
 from packages.services.src.commerce.delivery import DeliveryService
+from packages.services.src.commerce.disclosure import SellerDisclosureCheck
 from packages.services.src.commerce.grants import DeliveryGrantService
 from packages.services.src.domain.catalogue import CatalogueEntry, CatalogueEntryState
 from packages.services.src.domain.entitlement import EntitlementState
 from packages.services.src.domain.license import StorefrontListing
 from packages.services.src.domain.order import OrderState
-from packages.services.src.domain.seller import SellerDisclosure
+from packages.services.src.domain.seller import SellerDisclosure, SellerDisclosureItem
 from packages.services.src.payments.bepaid_provider import BePaidProvider
 from packages.services.src.payments.stripe_provider import StripeProvider
 from packages.services.src.persistence.memory import InMemoryStore
@@ -203,6 +204,7 @@ class CommerceHarness:
                 entitlements=self.store,
                 clock=self.clock,
                 checkout=self.checkout,
+                disclosures=self.store,
                 stripe=self.stripe,
                 bepaid=self.bepaid,
                 orders=self.store,
@@ -235,6 +237,75 @@ class CommerceHarness:
                 }
             ],
         }
+
+
+class TestCheckoutDisclosure:
+    async def test_absent_disclosure_names_every_item(self, tmp_path: Path) -> None:
+        harness = CommerceHarness(tmp_path)
+
+        response = harness.client.get('/checkout/disclosure')
+
+        assert response.status_code == 200
+        body = response.json()
+        assert body['complete'] is False
+        assert body['missing'] == [
+            item.value for item in SellerDisclosureCheck.REQUIRED_ITEMS
+        ]
+        assert body['disclosure'] == {
+            'legal_name': None,
+            'registration_number': None,
+            'registration_date': None,
+            'registration_authority': None,
+            'shop_register_number': None,
+            'postal_address': None,
+            'working_hours': None,
+            'contact_details': None,
+            'payment_rules': None,
+            'return_rules': None,
+            'payment_system_marks': [],
+        }
+        assert 'operator' not in response.text.lower()
+        assert 'secret' not in response.text.lower()
+        assert 'sk_test' not in response.text
+        assert 'bepaid_secret' not in response.text
+
+    async def test_incomplete_disclosure_names_missing_items(
+        self, tmp_path: Path
+    ) -> None:
+        harness = CommerceHarness(tmp_path)
+        incomplete = build_disclosure().model_copy(
+            update={'legal_name': None, 'payment_rules': None}
+        )
+        await harness.store.save_disclosure(incomplete)
+
+        response = harness.client.get('/checkout/disclosure')
+
+        assert response.status_code == 200
+        body = response.json()
+        assert body['complete'] is False
+        assert body['missing'] == [
+            SellerDisclosureItem.LEGAL_NAME.value,
+            SellerDisclosureItem.PAYMENT_RULES.value,
+        ]
+        assert body['disclosure']['registration_number'] == '100200300'
+        assert body['disclosure']['legal_name'] is None
+
+    async def test_complete_disclosure_is_readable(self, tmp_path: Path) -> None:
+        harness = CommerceHarness(tmp_path)
+        await harness.store.save_disclosure(build_disclosure())
+
+        response = harness.client.get('/checkout/disclosure')
+
+        assert response.status_code == 200
+        body = response.json()
+        assert body['complete'] is True
+        assert body['missing'] == []
+        assert body['disclosure']['legal_name'] == 'Velmor LLC'
+        assert body['disclosure']['registration_date'] == '2026-01-15'
+        assert body['disclosure']['payment_system_marks'] == ['visa', 'mastercard']
+        assert 'operator' not in response.text.lower()
+        assert 'sk_test' not in response.text
+        assert OPERATOR_KEY.get_secret_value() not in response.text
 
 
 class TestCheckoutStart:

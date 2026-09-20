@@ -4,6 +4,7 @@ export type {
   CatalogueGood,
   CategoryDetail,
   CategorySummary,
+  CheckoutDisclosureResponse,
   CheckoutLineRequest,
   CheckoutStartRequest,
   CheckoutStartResponse,
@@ -14,4 +15,5 @@ export type {
   Order,
   OrderLine,
   OrderState,
+  SellerDisclosurePayload,
 } from "./types";

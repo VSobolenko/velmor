@@ -101,6 +101,7 @@ class ApiServer:
             entitlements=store,
             clock=lambda: datetime.now(UTC),
             checkout=checkout,
+            disclosures=store,
             stripe=stripe,
             bepaid=bepaid,
             orders=store,

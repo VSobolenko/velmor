@@ -83,7 +83,7 @@ export default function CartPage() {
             </ul>
             <div className={styles.actions}>
               <Link href="/checkout" className={styles.button}>
-                Proceed to checkout
+                Pay
               </Link>
             </div>
           </>

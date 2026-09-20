@@ -87,6 +87,7 @@ def build_client(*, environment: str, storefront_domain: str, tmp_path: Path) ->
             entitlements=store,
             clock=FixedClock(NOW),
             checkout=checkout,
+            disclosures=store,
             stripe=stripe,
             bepaid=bepaid,
             orders=store,

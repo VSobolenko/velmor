@@ -25,6 +25,26 @@ export type CheckoutStartResponse = {
   state: string;
 };
 
+export type SellerDisclosurePayload = {
+  legal_name: string | null;
+  registration_number: string | null;
+  registration_date: string | null;
+  registration_authority: string | null;
+  shop_register_number: string | null;
+  postal_address: string | null;
+  working_hours: string | null;
+  contact_details: string | null;
+  payment_rules: string | null;
+  return_rules: string | null;
+  payment_system_marks: string[];
+};
+
+export type CheckoutDisclosureResponse = {
+  complete: boolean;
+  missing: string[];
+  disclosure: SellerDisclosurePayload;
+};
+
 export type EntitlementState = "active" | "revoked";
 
 export type Entitlement = {

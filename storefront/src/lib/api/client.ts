@@ -2,6 +2,7 @@ import type {
   CatalogueGood,
   CategoryDetail,
   CategorySummary,
+  CheckoutDisclosureResponse,
   CheckoutStartRequest,
   CheckoutStartResponse,
   Entitlement,
@@ -73,6 +74,14 @@ export class CommerceApiClient {
     return this.requestJson<CatalogueGood>(
       "GET",
       `/catalogue/goods/${encodeURIComponent(candidateId)}`,
+      false,
+    );
+  }
+
+  async getCheckoutDisclosure(): Promise<CheckoutDisclosureResponse> {
+    return this.requestJson<CheckoutDisclosureResponse>(
+      "GET",
+      "/checkout/disclosure",
       false,
     );
   }

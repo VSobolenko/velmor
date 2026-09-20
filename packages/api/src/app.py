@@ -23,6 +23,7 @@ from pydantic import BaseModel, SecretStr
 
 from packages.services.src.commerce.checkout import CheckoutService
 from packages.services.src.commerce.delivery import DeliveryService
+from packages.services.src.commerce.disclosure import SellerDisclosureCheck
 from packages.services.src.commerce.errors import (
     CheckoutRefusedError,
     DeliveryRefusedError,
@@ -36,6 +37,7 @@ from packages.services.src.domain.category import Category
 from packages.services.src.domain.entitlement import Entitlement, EntitlementState
 from packages.services.src.domain.license import StorefrontListing
 from packages.services.src.domain.rights import RightsRecord
+from packages.services.src.domain.seller import SellerDisclosure
 from packages.services.src.payments.bepaid_provider import BePaidProvider
 from packages.services.src.payments.errors import (
     PaymentNotificationError,
@@ -48,6 +50,7 @@ from packages.services.src.persistence.contract import (
     CategoryRepository,
     EntitlementRepository,
     OrderRepository,
+    SellerDisclosureRepository,
     StorefrontCatalog,
 )
 
@@ -278,6 +281,7 @@ class ApiApplication:
         entitlements: EntitlementRepository,
         clock: Callable[[], datetime],
         checkout: CheckoutService,
+        disclosures: SellerDisclosureRepository,
         stripe: StripeProvider,
         bepaid: BePaidProvider,
         orders: OrderRepository,
@@ -297,6 +301,8 @@ class ApiApplication:
         self._entitlements = entitlements
         self._clock = clock
         self._checkout = checkout
+        self._disclosures = disclosures
+        self._disclosure_check = SellerDisclosureCheck()
         self._stripe = stripe
         self._bepaid = bepaid
         self._orders = orders
@@ -351,6 +357,9 @@ class ApiApplication:
         app.add_api_route('/account/orders', self._list_orders, methods=['GET'])
         app.add_api_route(
             '/account/orders/{order_id}', self._get_order, methods=['GET']
+        )
+        app.add_api_route(
+            '/checkout/disclosure', self._checkout_disclosure, methods=['GET']
         )
         app.add_api_route('/checkout/start', self._checkout_start, methods=['POST'])
         app.add_api_route('/webhooks/stripe', self._stripe_webhook, methods=['POST'])
@@ -544,6 +553,23 @@ class ApiApplication:
         if order is None or order.buyer_id != buyer_id:
             return JSONResponse({'detail': 'order not found'}, status_code=404)
         return JSONResponse(order.model_dump(mode='json'))
+
+    async def _checkout_disclosure(self) -> JSONResponse:
+        """Public seller disclosure for the checkout gate (no auth).
+
+        Buyers must read the configured identity before pay. Operator keys and
+        payment secrets are never part of this payload.
+        """
+        row = await self._disclosures.current()
+        missing = self._disclosure_check.incomplete(row)
+        disclosure = row if row is not None else SellerDisclosure()
+        return JSONResponse(
+            {
+                'complete': len(missing) == 0,
+                'missing': [item.value for item in missing],
+                'disclosure': disclosure.model_dump(mode='json'),
+            }
+        )
 
     async def _checkout_start(
         self, request: Request, body: CheckoutStartBody

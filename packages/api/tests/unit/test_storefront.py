@@ -88,6 +88,7 @@ def build_client(
         entitlements=store,
         clock=lambda: _NOW,
         checkout=checkout,
+        disclosures=store,
         stripe=stripe,
         bepaid=bepaid,
         orders=store,

@@ -137,6 +137,7 @@ class CatalogueHarness:
                 entitlements=self.store,
                 clock=FixedClock(NOW),
                 checkout=checkout,
+                disclosures=self.store,
                 stripe=stripe,
                 bepaid=bepaid,
                 orders=self.store,

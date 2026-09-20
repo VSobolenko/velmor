@@ -135,6 +135,7 @@ class DownloadHarness:
                 entitlements=self.store,
                 clock=self.clock,
                 checkout=checkout,
+                disclosures=self.store,
                 stripe=stripe,
                 bepaid=bepaid,
                 orders=self.store,
