@@ -27,10 +27,11 @@ context: |
       behind a package under packages/services, never called from an agent node.
     - Logfire for tracing; Langfuse for LLM observability (prompt versions,
       cost, evals). OpenInference instrumentors bridge the two.
-    - Python only in the product. Node and TypeScript exist in exactly one place:
-      storefront/, a presentation layer. It holds no rights logic, no payment
-      secrets and no privileged Saleor credentials, and nothing about publishing
-      is decided there.
+    - Python only in the product. Node and TypeScript exist for the agent
+      harness and for exactly one product component: storefront/, a
+      presentation layer. It holds no rights logic, no payment secrets and no
+      privileged Saleor credentials, and nothing about publishing is decided
+      there.
 
   Layout:
     velmor/                     composition root: CLI, container, agent commands.
