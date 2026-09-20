@@ -1,0 +1,12 @@
+# Additive Proofbasket sites (append only; do not edit blocks above).
+# Proxies reach host listeners via host.docker.internal (compose extra_hosts).
+
+shop.78-111-89-46.sslip.io {
+	encode gzip
+	reverse_proxy host.docker.internal:3000
+}
+
+velmor-api.78-111-89-46.sslip.io {
+	encode gzip
+	reverse_proxy host.docker.internal:8080
+}

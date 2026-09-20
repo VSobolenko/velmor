@@ -1,0 +1,17 @@
+[Unit]
+Description=Velmor Proofbasket Next.js storefront
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/velmor/app/storefront
+Environment=NODE_ENV=production
+EnvironmentFile=/opt/velmor/app/storefront/.env.production
+ExecStart=/opt/velmor/app/storefront/node_modules/.bin/next start -H 127.0.0.1 -p 3000
+Restart=on-failure
+RestartSec=5
+MemoryMax=512M
+
+[Install]
+WantedBy=multi-user.target

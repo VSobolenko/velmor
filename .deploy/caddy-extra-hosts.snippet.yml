@@ -1,0 +1,10 @@
+# Apply under the existing `caddy:` service in /opt/pikupo/backend/docker-compose.yml
+# only. Do not change ports, volumes, or other services.
+#
+#   caddy:
+#     ...
+#     extra_hosts:
+#       - "host.docker.internal:host-gateway"
+
+extra_hosts:
+  - "host.docker.internal:host-gateway"
