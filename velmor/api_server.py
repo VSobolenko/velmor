@@ -13,8 +13,8 @@ from fastapi import FastAPI
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from packages.api.src.app import ApiApplication
+from packages.api.src.configs.settings import CommerceSettings
 from packages.core.src.bootstrap.observability import Observability
-from packages.core.src.bootstrap.platform_settings import PlatformSettings
 from packages.core.src.bootstrap.settings_loader import SettingsLoader
 from packages.services.src.persistence.postgres import PostgresStore
 
@@ -27,7 +27,7 @@ class ApiServer:
     SERVICE_NAME = 'velmor-api'
 
     def __init__(self, loader: SettingsLoader) -> None:
-        self._settings = PlatformSettings(loader)
+        self._settings: CommerceSettings = CommerceSettings(loader)
 
     def run(self, host: str, port: int) -> None:
         uvicorn.run(self._app(), host=host, port=port, log_level='info')
