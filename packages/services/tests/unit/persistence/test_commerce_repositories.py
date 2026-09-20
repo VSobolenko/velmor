@@ -6,11 +6,13 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from packages.services.src.commerce.disclosure import SellerDisclosureCheck
 from packages.services.src.domain.catalogue import CatalogueEntry, CatalogueEntryState
+from packages.services.src.domain.category import Category
 from packages.services.src.domain.entitlement import Entitlement, EntitlementState
 from packages.services.src.domain.license import StorefrontListing
 from packages.services.src.domain.seller import SellerDisclosure, SellerDisclosureItem
 from packages.services.src.persistence.contract import (
     CatalogueEntryRepository,
+    CategoryRepository,
     EntitlementRepository,
     SellerDisclosureRepository,
 )
@@ -19,6 +21,7 @@ from packages.services.src.persistence.postgres import PostgresStore
 
 PUBLISHED_AT = datetime(2026, 9, 20, 9, 0, tzinfo=timezone.utc)
 GRANTED_AT = datetime(2026, 9, 20, 10, 0, tzinfo=timezone.utc)
+CATEGORY_CREATED_AT = datetime(2026, 9, 20, 8, 0, tzinfo=timezone.utc)
 
 # A DSN with no credentials and no server behind it. ``create_async_engine``
 # builds the engine lazily and never connects, which is what lets the
@@ -100,6 +103,71 @@ def build_disclosure(
         return_rules='Digital goods are not returnable after download',
         payment_system_marks=('visa', 'mastercard'),
     )
+
+
+def build_category(
+    category_id: str = 'cat-photographs',
+    name: str = 'Photographs',
+    slug: str = 'photographs',
+    saleor_category_id: str = 'saleor-cat-1',
+    created_at: datetime = CATEGORY_CREATED_AT,
+) -> Category:
+    return Category(
+        category_id=category_id,
+        name=name,
+        slug=slug,
+        saleor_category_id=saleor_category_id,
+        created_at=created_at,
+    )
+
+
+class TestCategoryRepository:
+    async def test_a_category_round_trips_by_id_and_slug(self) -> None:
+        store = InMemoryStore()
+        category = build_category()
+
+        await store.save_category(category)
+
+        assert await store.by_id('cat-photographs') == category
+        assert await store.by_slug('photographs') == category
+
+    async def test_all_orders_by_name_then_category_id(self) -> None:
+        store = InMemoryStore()
+        zebra = build_category(category_id='cat-zebra', name='Zebra', slug='zebra')
+        apple_b = build_category(category_id='cat-apple-b', name='Apple', slug='apple-b')
+        apple_a = build_category(category_id='cat-apple-a', name='Apple', slug='apple-a')
+        for category in (zebra, apple_b, apple_a):
+            await store.save_category(category)
+
+        assert await store.all() == (apple_a, apple_b, zebra)
+
+    async def test_save_category_replaces_by_category_id(self) -> None:
+        store = InMemoryStore()
+        await store.save_category(build_category())
+        renamed = build_category(name='Photos', slug='photos')
+
+        await store.save_category(renamed)
+
+        assert await store.by_id('cat-photographs') == renamed
+        assert await store.by_slug('photos') == renamed
+        assert await store.by_slug('photographs') is None
+
+    async def test_delete_category_removes_the_row(self) -> None:
+        store = InMemoryStore()
+        await store.save_category(build_category())
+
+        await store.delete_category('cat-photographs')
+
+        assert await store.by_id('cat-photographs') is None
+        assert await store.by_slug('photographs') is None
+        assert await store.all() == ()
+
+    async def test_delete_category_of_a_missing_id_is_a_noop(self) -> None:
+        store = InMemoryStore()
+
+        await store.delete_category('cat-missing')
+
+        assert await store.all() == ()
 
 
 class TestCatalogueEntryRepository:
@@ -321,6 +389,18 @@ class _IncompleteCatalogueEntryRepository:
     async def by_category(self, category_id: str) -> tuple[CatalogueEntry, ...]: ...
 
 
+class _IncompleteCategoryRepository:
+    """Implements four of the five ``CategoryRepository`` methods."""
+
+    async def save_category(self, category: Category) -> None: ...
+
+    async def by_id(self, category_id: str) -> Category | None: ...
+
+    async def by_slug(self, slug: str) -> Category | None: ...
+
+    async def all(self) -> tuple[Category, ...]: ...
+
+
 class _IncompleteEntitlementRepository:
     """Implements two of the three ``EntitlementRepository`` methods."""
 
@@ -351,6 +431,7 @@ class TestRepositoryConformance:
         store = InMemoryStore()
 
         assert isinstance(store, CatalogueEntryRepository)
+        assert isinstance(store, CategoryRepository)
         assert isinstance(store, EntitlementRepository)
         assert isinstance(store, SellerDisclosureRepository)
 
@@ -359,6 +440,7 @@ class TestRepositoryConformance:
         store = PostgresStore(engine, async_sessionmaker(engine, expire_on_commit=False))
 
         assert isinstance(store, CatalogueEntryRepository)
+        assert isinstance(store, CategoryRepository)
         assert isinstance(store, EntitlementRepository)
         assert isinstance(store, SellerDisclosureRepository)
 
@@ -368,6 +450,7 @@ class TestRepositoryConformance:
         assert not isinstance(
             _IncompleteCatalogueEntryRepository(), CatalogueEntryRepository
         )
+        assert not isinstance(_IncompleteCategoryRepository(), CategoryRepository)
         assert not isinstance(_IncompleteEntitlementRepository(), EntitlementRepository)
         assert not isinstance(
             _IncompleteSellerDisclosureRepository(), SellerDisclosureRepository

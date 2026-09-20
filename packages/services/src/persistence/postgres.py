@@ -1,11 +1,12 @@
 from __future__ import annotations
 
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
 from packages.services.src.domain.candidate import Candidate
 from packages.services.src.domain.catalogue import CatalogueEntry
+from packages.services.src.domain.category import Category
 from packages.services.src.domain.entitlement import Entitlement
 from packages.services.src.domain.gate import GateDecision
 from packages.services.src.domain.rights import RightsRecord
@@ -15,7 +16,7 @@ from packages.services.src.persistence.schema import Schema
 
 
 class PostgresStore:
-    """Candidate, verdict and commerce storage in PostgreSQL.
+    """Candidate, verdict, catalogue, category and commerce storage in PostgreSQL.
 
     Satisfies every repository protocol; the interfaces stay separate because the
     operations belong to different stages of the pipeline.
@@ -205,6 +206,69 @@ class PostgresStore:
         async with self._session_factory() as session:
             rows = (await session.execute(statement)).mappings().all()
         return tuple(CatalogueEntry.model_validate(row['entry']) for row in rows)
+
+    async def save_category(self, category: Category) -> None:
+        statement = (
+            insert(Schema.categories)
+            .values(
+                category_id=category.category_id,
+                name=category.name,
+                slug=category.slug,
+                saleor_category_id=category.saleor_category_id,
+                created_at=category.created_at,
+                category=category.model_dump(mode='json'),
+            )
+            .on_conflict_do_update(
+                index_elements=['category_id'],
+                set_={
+                    'name': category.name,
+                    'slug': category.slug,
+                    'saleor_category_id': category.saleor_category_id,
+                    'created_at': category.created_at,
+                    'category': category.model_dump(mode='json'),
+                },
+            )
+        )
+        async with self._session_factory() as session:
+            await session.execute(statement)
+            await session.commit()
+
+    async def by_id(self, category_id: str) -> Category | None:
+        statement = select(Schema.categories.c.category).where(
+            Schema.categories.c.category_id == category_id
+        )
+        async with self._session_factory() as session:
+            row = (await session.execute(statement)).mappings().one_or_none()
+        if row is None:
+            return None
+        return Category.model_validate(row['category'])
+
+    async def by_slug(self, slug: str) -> Category | None:
+        statement = select(Schema.categories.c.category).where(
+            Schema.categories.c.slug == slug
+        )
+        async with self._session_factory() as session:
+            row = (await session.execute(statement)).mappings().one_or_none()
+        if row is None:
+            return None
+        return Category.model_validate(row['category'])
+
+    async def all(self) -> tuple[Category, ...]:
+        statement = select(Schema.categories.c.category).order_by(
+            Schema.categories.c.name,
+            Schema.categories.c.category_id,
+        )
+        async with self._session_factory() as session:
+            rows = (await session.execute(statement)).mappings().all()
+        return tuple(Category.model_validate(row['category']) for row in rows)
+
+    async def delete_category(self, category_id: str) -> None:
+        statement = delete(Schema.categories).where(
+            Schema.categories.c.category_id == category_id
+        )
+        async with self._session_factory() as session:
+            await session.execute(statement)
+            await session.commit()
 
     async def save_entitlement(self, entitlement: Entitlement) -> None:
         statement = (

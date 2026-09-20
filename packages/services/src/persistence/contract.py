@@ -4,6 +4,7 @@ from typing import Protocol, runtime_checkable
 
 from packages.services.src.domain.candidate import Candidate
 from packages.services.src.domain.catalogue import CatalogueEntry
+from packages.services.src.domain.category import Category
 from packages.services.src.domain.entitlement import Entitlement
 from packages.services.src.domain.gate import GateDecision
 from packages.services.src.domain.rights import RightsRecord
@@ -100,6 +101,37 @@ class CatalogueEntryRepository(Protocol):
 
     async def entries(self, limit: int) -> tuple[CatalogueEntry, ...]:
         """The catalogue, most recently published first, capped at ``limit``."""
+        ...
+
+
+@runtime_checkable
+class CategoryRepository(Protocol):
+    """Storage for storefront categories the operator (or agent) manages.
+
+    Categories are explicit rows, not something inferred at render time from a
+    model call (design D4). ``save_category`` upserts by ``category_id``;
+    ``delete_category`` of a missing id is a no-op. ``all`` returns every
+    category ordered by ``name`` ascending, then ``category_id`` ascending.
+    """
+
+    async def save_category(self, category: Category) -> None:
+        """Store the category, replacing any earlier one with the same id."""
+        ...
+
+    async def by_id(self, category_id: str) -> Category | None:
+        """The category with this id, or ``None`` if it does not exist."""
+        ...
+
+    async def by_slug(self, slug: str) -> Category | None:
+        """The category with this slug, or ``None`` if it does not exist."""
+        ...
+
+    async def all(self) -> tuple[Category, ...]:
+        """Every category, ordered by name ascending then category_id ascending."""
+        ...
+
+    async def delete_category(self, category_id: str) -> None:
+        """Remove the category. A missing id is a no-op."""
         ...
 
 

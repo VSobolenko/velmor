@@ -62,6 +62,17 @@ class Schema:
         Column('entry', JSONB, nullable=False),
     )
 
+    categories = Table(
+        'categories',
+        metadata,
+        Column('category_id', Text, primary_key=True),
+        Column('name', Text, nullable=False),
+        Column('slug', Text, nullable=False, unique=True, index=True),
+        Column('saleor_category_id', Text, nullable=False),
+        Column('created_at', DateTime(timezone=True), nullable=False),
+        Column('category', JSONB, nullable=False),
+    )
+
     entitlements = Table(
         'entitlements',
         metadata,

@@ -4,6 +4,7 @@ from collections.abc import Iterable
 
 from packages.services.src.domain.candidate import Candidate
 from packages.services.src.domain.catalogue import CatalogueEntry
+from packages.services.src.domain.category import Category
 from packages.services.src.domain.entitlement import Entitlement
 from packages.services.src.domain.gate import GateDecision
 from packages.services.src.domain.rights import RightsRecord
@@ -12,7 +13,7 @@ from packages.services.src.persistence.contract import SELLER_DISCLOSURE_KEY
 
 
 class InMemoryStore:
-    """Candidate, verdict and commerce storage held in process memory, for tests and dry runs.
+    """Candidate, verdict, catalogue, category and commerce storage held in process memory.
 
     It implements every repository protocol, as ``PostgresStore`` does, because
     the two are one contract in practice: ``pending_audit`` is an anti-join
@@ -31,6 +32,7 @@ class InMemoryStore:
         self._candidates: dict[str, Candidate] = {}
         self._decisions: dict[str, GateDecision] = {}
         self._entries: dict[str, CatalogueEntry] = {}
+        self._categories: dict[str, Category] = {}
         self._entitlements: dict[tuple[str, str], Entitlement] = {}
         self._disclosures: dict[str, SellerDisclosure] = {}
 
@@ -81,6 +83,29 @@ class InMemoryStore:
 
     async def entries(self, limit: int) -> tuple[CatalogueEntry, ...]:
         return self._in_catalogue_order(self._entries.values())[:limit]
+
+    async def save_category(self, category: Category) -> None:
+        self._categories[category.category_id] = category
+
+    async def by_id(self, category_id: str) -> Category | None:
+        return self._categories.get(category_id)
+
+    async def by_slug(self, slug: str) -> Category | None:
+        for category in self._categories.values():
+            if category.slug == slug:
+                return category
+        return None
+
+    async def all(self) -> tuple[Category, ...]:
+        return tuple(
+            sorted(
+                self._categories.values(),
+                key=lambda category: (category.name, category.category_id),
+            )
+        )
+
+    async def delete_category(self, category_id: str) -> None:
+        self._categories.pop(category_id, None)
 
     async def save_entitlement(self, entitlement: Entitlement) -> None:
         self._entitlements[(entitlement.order_id, entitlement.candidate_id)] = entitlement

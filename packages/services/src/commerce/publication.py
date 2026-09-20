@@ -4,6 +4,7 @@ from datetime import datetime
 from typing import Protocol
 
 from packages.services.src.commerce.errors import PublicationSourceMismatchError
+from packages.services.src.commerce.slugs import ProductSlug
 from packages.services.src.domain.candidate import Candidate
 from packages.services.src.domain.catalogue import CatalogueEntry, CatalogueEntryState
 from packages.services.src.domain.gate import GateDecision
@@ -144,7 +145,7 @@ class PublicationBridge:
     async def _create_published(
         self, candidate: Candidate, decision: GateDecision, now: datetime
     ) -> PublicationOutcome:
-        slug = self._slug_for(candidate.id)
+        slug = ProductSlug.for_candidate(candidate.id)
         sku = self._sku_for(candidate.id)
         product_type_id = await self._saleor.ensure_product_type(DIGITAL_PRODUCT_TYPE_NAME)
         product = await self._saleor.create_product(
@@ -181,7 +182,7 @@ class PublicationBridge:
         decision: GateDecision,
         existing: CatalogueEntry,
     ) -> PublicationOutcome:
-        slug = self._slug_for(candidate.id)
+        slug = ProductSlug.for_candidate(candidate.id)
         sku = self._sku_for(candidate.id)
         await self._saleor.update_product(
             product_id=existing.saleor_product_id,
@@ -217,7 +218,7 @@ class PublicationBridge:
         decision: GateDecision,
         existing: CatalogueEntry,
     ) -> PublicationOutcome:
-        slug = self._slug_for(candidate.id)
+        slug = ProductSlug.for_candidate(candidate.id)
         sku = self._sku_for(candidate.id)
         await self._saleor.update_product(
             product_id=existing.saleor_product_id,
@@ -270,11 +271,6 @@ class PublicationBridge:
             reasons=(reason,),
             entry=entry,
         )
-
-    @staticmethod
-    def _slug_for(candidate_id: str) -> str:
-        # Deterministic from candidate.id so a title rename cannot orphan the slug.
-        return f'good-{candidate_id}'.lower()
 
     @staticmethod
     def _sku_for(candidate_id: str) -> str:

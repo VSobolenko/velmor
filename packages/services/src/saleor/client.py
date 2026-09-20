@@ -143,6 +143,10 @@ class CategoryCreateData(BaseModel):
     categoryCreate: CategoryPayload
 
 
+class CategoryUpdateData(BaseModel):
+    categoryUpdate: CategoryPayload
+
+
 class CategoryDeleteData(BaseModel):
     categoryDelete: CategoryPayload
 
@@ -336,6 +340,21 @@ class SaleorClient:
         }
     """
 
+    CATEGORY_UPDATE_MUTATION = """
+        mutation UpdateCategory($id: ID!, $input: CategoryInput!) {
+          categoryUpdate(id: $id, input: $input) {
+            category {
+              id
+            }
+            errors {
+              message
+              field
+              code
+            }
+          }
+        }
+    """
+
     CATEGORY_DELETE_MUTATION = """
         mutation DeleteCategory($id: ID!) {
           categoryDelete(id: $id) {
@@ -472,6 +491,19 @@ class SaleorClient:
             CategoryCreateData,
         )
         entity = self._accepted_entity('create_category', data.categoryCreate)
+        return SaleorCategory(category_id=entity.id)
+
+    async def update_category(
+        self, category_id: str, name: str, slug: str
+    ) -> SaleorCategory:
+        """Update a category's name and slug."""
+        data = await self._execute(
+            'update_category',
+            self.CATEGORY_UPDATE_MUTATION,
+            {'id': category_id, 'input': {'name': name, 'slug': slug}},
+            CategoryUpdateData,
+        )
+        entity = self._accepted_entity('update_category', data.categoryUpdate)
         return SaleorCategory(category_id=entity.id)
 
     async def delete_category(self, category_id: str) -> None:

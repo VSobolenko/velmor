@@ -44,6 +44,7 @@ PRODUCT_UPDATED = {'data': {'productUpdate': {'product': {'id': PRODUCT_ID}}}}
 VARIANT_CREATED = {'data': {'productVariantCreate': {'productVariant': {'id': VARIANT_ID}}}}
 VARIANT_UPDATED = {'data': {'productVariantUpdate': {'productVariant': {'id': VARIANT_ID}}}}
 CATEGORY_CREATED = {'data': {'categoryCreate': {'category': {'id': CATEGORY_ID}}}}
+CATEGORY_UPDATED = {'data': {'categoryUpdate': {'category': {'id': CATEGORY_ID}}}}
 CATEGORY_DELETED = {'data': {'categoryDelete': {'category': {'id': CATEGORY_ID}}}}
 ORDER_READ = {
     'data': {
@@ -107,6 +108,12 @@ MUTATIONS: tuple[tuple[str, str, str, MutationCall], ...] = (
         'categoryCreate',
         'category',
         lambda client: client.create_category('Photographs', 'photographs'),
+    ),
+    (
+        'update_category',
+        'categoryUpdate',
+        'category',
+        lambda client: client.update_category(CATEGORY_ID, 'Images', 'images'),
     ),
     (
         'delete_category',
@@ -278,6 +285,22 @@ class TestTheEightOperations:
         body = assert_graphql_request(stub.requests[0], 'categoryCreate')
         assert body['variables'] == {'input': {'name': 'Photographs', 'slug': 'photographs'}}
 
+    async def test_update_category_returns_the_category_id(self) -> None:
+        stub = StubTransport(CATEGORY_UPDATED)
+
+        async with httpx.AsyncClient(transport=httpx.MockTransport(stub)) as http:
+            category = await build_client(http).update_category(
+                CATEGORY_ID, 'Images', 'images'
+            )
+
+        assert category == SaleorCategory(category_id=CATEGORY_ID)
+        body = assert_graphql_request(stub.requests[0], 'categoryUpdate')
+        assert body['variables'] == {
+            'id': CATEGORY_ID,
+            'input': {'name': 'Images', 'slug': 'images'},
+        }
+        assert_mutation_selects_payload_errors(body['query'])
+
     async def test_delete_category_returns_nothing(self) -> None:
         stub = StubTransport(CATEGORY_DELETED)
 
@@ -353,6 +376,7 @@ class TestMutationDocumentsSelectPayloadErrors:
             'productVariantCreate': VARIANT_CREATED,
             'productVariantUpdate': VARIANT_UPDATED,
             'categoryCreate': CATEGORY_CREATED,
+            'categoryUpdate': CATEGORY_UPDATED,
             'categoryDelete': CATEGORY_DELETED,
         }
         stub = StubTransport(payloads[mutation_field])
