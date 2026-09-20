@@ -161,5 +161,28 @@ def serve(
         raise typer.Exit(code=1) from error
 
 
+@app.command('publish')
+def publish(
+    environment: Annotated[
+        Environment,
+        typer.Option('--env', '-e', help='Deployment profile to load'),
+    ] = Environment.DEV,
+    limit: Annotated[
+        int,
+        typer.Option('--limit', help='Max gate-publishable goods to process'),
+    ] = 200,
+) -> None:
+    """Publish gate-approved goods into Saleor and the paid catalogue."""
+    # Imported here so `--help` and `sources` do not pay for the commerce stack.
+    from velmor.publish import PublishCommand
+
+    try:
+        loader = SettingsLoader(EnvFileResolver.resolve_api(environment))
+        PublishCommand(loader).run(limit)
+    except (VelmorError, FileNotFoundError, ValueError) as error:
+        typer.secho(f'error: {error}', fg=typer.colors.RED, err=True)
+        raise typer.Exit(code=1) from error
+
+
 def main() -> None:
     app()
