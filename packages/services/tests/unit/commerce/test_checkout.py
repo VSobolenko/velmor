@@ -141,7 +141,7 @@ class TestCheckoutStart:
         assert return_url == RETURN_URL
         assert started_order.total == order.total
         assert started_order.currency == CURRENCY
-        assert await store.by_id(order.order_id) == order
+        assert await store.by_order_id(order.order_id) == order
 
     async def test_incomplete_disclosure_refuses_without_calling_provider(self) -> None:
         store = InMemoryStore()
@@ -294,7 +294,7 @@ class TestCheckoutConfirm:
         with pytest.raises(CheckoutRefusedError):
             await service.confirm(confirmation, NOW)
 
-        stored = await store.by_id(order.order_id)
+        stored = await store.by_order_id(order.order_id)
         assert stored is not None
         assert stored.state is OrderState.PENDING
         assert await store.for_buyer_candidate(BUYER_ID, CANDIDATE_A) == ()

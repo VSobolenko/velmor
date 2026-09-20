@@ -90,14 +90,8 @@ class InMemoryStore:
     async def save_category(self, category: Category) -> None:
         self._categories[category.category_id] = category
 
-    async def by_id(self, entity_id: str) -> Category | Order | None:
-        # CategoryRepository and OrderRepository both name this method ``by_id``.
-        # One store implements both protocols, so one method serves both tables;
-        # the id namespaces do not overlap (category ids vs order uuids).
-        order = self._orders.get(entity_id)
-        if order is not None:
-            return order
-        return self._categories.get(entity_id)
+    async def by_id(self, category_id: str) -> Category | None:
+        return self._categories.get(category_id)
 
     async def by_slug(self, slug: str) -> Category | None:
         for category in self._categories.values():
@@ -155,6 +149,9 @@ class InMemoryStore:
                 )
             self._orders_by_provider_ref[key] = order.order_id
         self._orders[order.order_id] = order
+
+    async def by_order_id(self, order_id: str) -> Order | None:
+        return self._orders.get(order_id)
 
     async def by_provider_reference(
         self, provider_id: str, provider_reference: str

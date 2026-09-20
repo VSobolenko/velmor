@@ -234,26 +234,15 @@ class PostgresStore:
             await session.execute(statement)
             await session.commit()
 
-    async def by_id(self, entity_id: str) -> Category | Order | None:
-        # CategoryRepository and OrderRepository both name this method ``by_id``.
-        # One store implements both protocols, so one method serves both tables;
-        # the id namespaces do not overlap (category ids vs order uuids).
-        order_statement = select(Schema.orders.c.order).where(
-            Schema.orders.c.order_id == entity_id
-        )
-        category_statement = select(Schema.categories.c.category).where(
-            Schema.categories.c.category_id == entity_id
+    async def by_id(self, category_id: str) -> Category | None:
+        statement = select(Schema.categories.c.category).where(
+            Schema.categories.c.category_id == category_id
         )
         async with self._session_factory() as session:
-            order_row = (await session.execute(order_statement)).mappings().one_or_none()
-            if order_row is not None:
-                return Order.model_validate(order_row['order'])
-            category_row = (
-                await session.execute(category_statement)
-            ).mappings().one_or_none()
-        if category_row is None:
+            row = (await session.execute(statement)).mappings().one_or_none()
+        if row is None:
             return None
-        return Category.model_validate(category_row['category'])
+        return Category.model_validate(row['category'])
 
     async def by_slug(self, slug: str) -> Category | None:
         statement = select(Schema.categories.c.category).where(
@@ -395,6 +384,16 @@ class PostgresStore:
         async with self._session_factory() as session:
             await session.execute(statement)
             await session.commit()
+
+    async def by_order_id(self, order_id: str) -> Order | None:
+        statement = select(Schema.orders.c.order).where(
+            Schema.orders.c.order_id == order_id
+        )
+        async with self._session_factory() as session:
+            row = (await session.execute(statement)).mappings().one_or_none()
+        if row is None:
+            return None
+        return Order.model_validate(row['order'])
 
     async def by_provider_reference(
         self, provider_id: str, provider_reference: str

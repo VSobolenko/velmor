@@ -5,6 +5,7 @@ from decimal import Decimal
 
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
+from packages.services.src.domain.category import Category
 from packages.services.src.domain.order import Order, OrderLine, OrderState
 from packages.services.src.persistence.contract import OrderRepository
 from packages.services.src.persistence.memory import InMemoryStore
@@ -41,13 +42,13 @@ def build_order(
 
 
 class TestOrderRepository:
-    async def test_an_order_round_trips_by_id(self) -> None:
+    async def test_an_order_round_trips_by_order_id(self) -> None:
         store = InMemoryStore()
         order = build_order()
 
         await store.save_order(order)
 
-        assert await store.by_id('order-1') == order
+        assert await store.by_order_id('order-1') == order
 
     async def test_by_provider_reference_finds_the_order(self) -> None:
         store = InMemoryStore()
@@ -67,7 +68,7 @@ class TestOrderRepository:
 
         await store.save_order(paid)
 
-        assert await store.by_id('order-1') == paid
+        assert await store.by_order_id('order-1') == paid
         assert await store.by_provider_reference('fake', 'ref-1') == paid
 
     async def test_order_without_provider_reference_is_not_indexed(self) -> None:
@@ -75,8 +76,32 @@ class TestOrderRepository:
         order = build_order(provider_id=None, provider_reference=None)
         await store.save_order(order)
 
-        assert await store.by_id('order-1') == order
+        assert await store.by_order_id('order-1') == order
         assert await store.by_provider_reference('fake', 'ref-1') is None
+
+    async def test_by_id_and_by_order_id_do_not_dual_lookup(self) -> None:
+        """A shared string id must not cross the category and order tables.
+
+        Same defect class as the save / save_order rename: one store implements
+        both protocols, so each lookup method must hit only its own map.
+        """
+        store = InMemoryStore()
+        shared_id = 'shared-id'
+        category = Category(
+            category_id=shared_id,
+            name='Shared',
+            slug='shared',
+            saleor_category_id='saleor-shared',
+            created_at=CREATED_AT,
+        )
+        order = build_order(order_id=shared_id)
+        await store.save_category(category)
+        await store.save_order(order)
+
+        assert await store.by_id(shared_id) == category
+        assert await store.by_order_id(shared_id) == order
+        assert not isinstance(await store.by_id(shared_id), Order)
+        assert not isinstance(await store.by_order_id(shared_id), Category)
 
 
 class TestOrderRepositoryConformance:
@@ -95,6 +120,6 @@ class TestOrderRepositoryConformance:
         class Incomplete:
             async def save_order(self, order: Order) -> None: ...
 
-            async def by_id(self, order_id: str) -> Order | None: ...
+            async def by_order_id(self, order_id: str) -> Order | None: ...
 
         assert not isinstance(Incomplete(), OrderRepository)

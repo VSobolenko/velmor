@@ -71,7 +71,7 @@ class CheckoutService:
         return started, payment
 
     async def confirm(self, confirmation: PaymentConfirmation, now: datetime) -> Order:
-        order = await self._orders.by_id(confirmation.order_id)
+        order = await self._orders.by_order_id(confirmation.order_id)
         if order is None:
             raise CheckoutRefusedError(
                 f'order {confirmation.order_id} is unknown'

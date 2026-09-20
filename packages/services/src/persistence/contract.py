@@ -200,18 +200,17 @@ class OrderRepository(Protocol):
     ``by_provider_reference`` when a notification arrives. Uniqueness of
     ``(provider_id, provider_reference)`` when the reference is set is a store
     invariant: Postgres uses a partial unique index; InMemory enforces it on
-    write. The write method is named ``save_order`` rather than ``save`` because
-    ``RightsRecordRepository.save`` already holds that name on both stores.
-    ``by_id`` shares its name with ``CategoryRepository.by_id``; the combined
-    store looks up orders then categories so both protocols keep the brief's
-    name.
+    write. Write and read methods are named after the subject
+    (``save_order``, ``by_order_id``) rather than ``save`` / ``by_id``, because
+    ``RightsRecordRepository.save`` and ``CategoryRepository.by_id`` already
+    hold those names on both stores.
     """
 
     async def save_order(self, order: Order) -> None:
         """Store the order, replacing any earlier one with the same id."""
         ...
 
-    async def by_id(self, order_id: str) -> Order | None:
+    async def by_order_id(self, order_id: str) -> Order | None:
         """The order with this id, or ``None`` if it does not exist."""
         ...
 
