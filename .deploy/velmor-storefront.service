@@ -8,7 +8,9 @@ Type=simple
 WorkingDirectory=/opt/velmor/app/storefront
 Environment=NODE_ENV=production
 EnvironmentFile=/opt/velmor/app/storefront/.env.production
-ExecStart=/opt/velmor/app/storefront/node_modules/.bin/next start -H 127.0.0.1 -p 3000
+# Bind 0.0.0.0 so Caddy in Docker can reach the process via
+# host.docker.internal (Linux host-gateway cannot dial 127.0.0.1).
+ExecStart=/opt/velmor/app/storefront/node_modules/.bin/next start -H 0.0.0.0 -p 3000
 Restart=on-failure
 RestartSec=5
 MemoryMax=512M
