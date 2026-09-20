@@ -9,16 +9,23 @@ from pydantic import SecretStr
 
 from packages.api.src.app import ApiApplication, StorefrontPage
 from packages.services.src.commerce.asset_cache import AssetCache
+from packages.services.src.commerce.checkout import CheckoutService
 from packages.services.src.commerce.delivery import DeliveryService
 from packages.services.src.commerce.grants import DeliveryGrantService
 from packages.services.src.domain.candidate import Candidate
 from packages.services.src.domain.rights import RightsRecord
+from packages.services.src.payments.bepaid_provider import BePaidProvider
+from packages.services.src.payments.stripe_provider import StripeProvider
 from packages.services.src.persistence.memory import InMemoryStore
 from packages.services.tests.conftest import build_candidate, build_record
+from packages.services.tests.unit.payments.test_bepaid_provider import (
+    PUBLIC_KEY_PEM as BEPAID_PUBLIC_KEY_PEM,
+)
 
 Good = tuple[Candidate, RightsRecord]
 
 _GRANT_SECRET = SecretStr('storefront-unit-grant-secret')
+_OPERATOR_KEY = SecretStr('storefront-unit-operator-key')
 _NOW = datetime(2026, 9, 20, 12, 0, tzinfo=UTC)
 
 
@@ -51,6 +58,25 @@ def build_client(
         entitlements=store, entries=store, cache=cache, http=http
     )
     grants = DeliveryGrantService(secret=_GRANT_SECRET, lifetime_seconds=900)
+    stripe = StripeProvider(
+        secret_key=SecretStr('sk_test_storefront'),
+        webhook_secret=SecretStr('whsec_storefront'),
+        http=http,
+    )
+    bepaid = BePaidProvider(
+        shop_id='storefront-shop',
+        secret_key=SecretStr('bepaid_storefront'),
+        public_key_pem=BEPAID_PUBLIC_KEY_PEM,
+        http=http,
+        notification_url='https://shop.example/webhooks/bepaid',
+    )
+    checkout = CheckoutService(
+        entries=store,
+        disclosures=store,
+        orders=store,
+        entitlements=store,
+        providers={'stripe': stripe, 'bepaid': bepaid},
+    )
     app = ApiApplication(
         'test',
         catalog,
@@ -58,6 +84,11 @@ def build_client(
         delivery=delivery,
         entitlements=store,
         clock=lambda: _NOW,
+        checkout=checkout,
+        stripe=stripe,
+        bepaid=bepaid,
+        orders=store,
+        operator_refund_key=_OPERATOR_KEY,
     ).build()
     return TestClient(app), catalog
 

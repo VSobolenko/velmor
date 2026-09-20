@@ -10,13 +10,19 @@ from pydantic import SecretStr
 
 from packages.api.src.app import ApiApplication
 from packages.services.src.commerce.asset_cache import AssetCache
+from packages.services.src.commerce.checkout import CheckoutService
 from packages.services.src.commerce.delivery import DeliveryService
 from packages.services.src.commerce.grants import DeliveryGrantService
 from packages.services.src.domain.catalogue import CatalogueEntry, CatalogueEntryState
 from packages.services.src.domain.entitlement import Entitlement, EntitlementState
 from packages.services.src.domain.license import StorefrontListing
+from packages.services.src.payments.bepaid_provider import BePaidProvider
+from packages.services.src.payments.stripe_provider import StripeProvider
 from packages.services.src.persistence.memory import InMemoryStore
 from packages.services.tests.conftest import build_candidate, build_record
+from packages.services.tests.unit.payments.test_bepaid_provider import (
+    PUBLIC_KEY_PEM as BEPAID_PUBLIC_KEY_PEM,
+)
 
 ORIGIN_URL = 'https://secret-origin.example/never-leak/asset.bin'
 BUYER_ID = 'buyer-1'
@@ -29,6 +35,8 @@ EARLIER = datetime(2026, 9, 19, 8, 0, tzinfo=UTC)
 SECRET = SecretStr('api-unit-delivery-grant-secret')
 LIFETIME = 900
 BUYER_HEADER = 'X-Buyer-Id'
+OPERATOR_KEY = SecretStr('api-unit-operator-refund-key')
+BEPAID_NOTIFICATION = 'https://shop.example/webhooks/bepaid'
 
 
 class FixedClock:
@@ -95,6 +103,25 @@ class DownloadHarness:
             cache=self.cache,
             http=self.http,
         )
+        stripe = StripeProvider(
+            secret_key=SecretStr('sk_test_download_harness'),
+            webhook_secret=SecretStr('whsec_download_harness'),
+            http=self.http,
+        )
+        bepaid = BePaidProvider(
+            shop_id='download-harness-shop',
+            secret_key=SecretStr('bepaid_download_harness'),
+            public_key_pem=BEPAID_PUBLIC_KEY_PEM,
+            http=self.http,
+            notification_url=BEPAID_NOTIFICATION,
+        )
+        checkout = CheckoutService(
+            entries=self.store,
+            disclosures=self.store,
+            orders=self.store,
+            entitlements=self.store,
+            providers={'stripe': stripe, 'bepaid': bepaid},
+        )
         catalog_goods = ((build_candidate(candidate_id=CANDIDATE_ID), build_record()),)
         self.client = TestClient(
             ApiApplication(
@@ -104,6 +131,11 @@ class DownloadHarness:
                 delivery=self.delivery,
                 entitlements=self.store,
                 clock=self.clock,
+                checkout=checkout,
+                stripe=stripe,
+                bepaid=bepaid,
+                orders=self.store,
+                operator_refund_key=OPERATOR_KEY,
             ).build()
         )
 

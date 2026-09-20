@@ -9,21 +9,40 @@ markup, because those strings are written by strangers.
 
 from __future__ import annotations
 
+import hmac
 from collections.abc import Callable
 from contextlib import AbstractAsyncContextManager
 from datetime import UTC, datetime
+from decimal import Decimal
 from html import escape
 
 from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse, JSONResponse, Response
+from pydantic import BaseModel, SecretStr
 
+from packages.services.src.commerce.checkout import CheckoutService
 from packages.services.src.commerce.delivery import DeliveryService
-from packages.services.src.commerce.errors import DeliveryRefusedError, GrantRefusedError
+from packages.services.src.commerce.errors import (
+    CheckoutRefusedError,
+    DeliveryRefusedError,
+    GrantRefusedError,
+)
 from packages.services.src.commerce.grants import DeliveryGrantService
 from packages.services.src.domain.candidate import Candidate
-from packages.services.src.domain.entitlement import EntitlementState
+from packages.services.src.domain.cart import Cart, CartLine
+from packages.services.src.domain.entitlement import Entitlement, EntitlementState
 from packages.services.src.domain.rights import RightsRecord
-from packages.services.src.persistence.contract import EntitlementRepository, StorefrontCatalog
+from packages.services.src.payments.bepaid_provider import BePaidProvider
+from packages.services.src.payments.errors import (
+    PaymentNotificationError,
+    PaymentProviderError,
+)
+from packages.services.src.payments.stripe_provider import StripeProvider
+from packages.services.src.persistence.contract import (
+    EntitlementRepository,
+    OrderRepository,
+    StorefrontCatalog,
+)
 
 Good = tuple[Candidate, RightsRecord]
 Lifespan = Callable[[FastAPI], AbstractAsyncContextManager[None]]
@@ -195,6 +214,33 @@ footer {
         return f'{source} &middot; {download}'
 
 
+class CheckoutLineBody(BaseModel):
+    """One cart line posted by the client; there is no server-side cart table."""
+
+    model_config = {'frozen': True}
+
+    candidate_id: str
+    unit_amount: Decimal
+    quantity: int
+
+
+class CheckoutStartBody(BaseModel):
+    """Checkout start payload: cart lines travel with the request (task 5.5 R5)."""
+
+    model_config = {'frozen': True}
+
+    provider_id: str
+    return_url: str
+    currency: str
+    lines: tuple[CheckoutLineBody, ...]
+
+
+class RefundBody(BaseModel):
+    model_config = {'frozen': True}
+
+    reason: str
+
+
 class ApiApplication:
     """The HTTP surface of the platform.
 
@@ -204,6 +250,10 @@ class ApiApplication:
 
     CATALOGUE_LIMIT = 100
     BUYER_HEADER = 'x-buyer-id'
+    OPERATOR_HEADER = 'x-operator-key'
+    STRIPE_SIGNATURE_HEADER = 'stripe-signature'
+    BEPAID_SIGNATURE_HEADER = 'content-signature'
+    AUTHORIZATION_HEADER = 'authorization'
 
     def __init__(
         self,
@@ -213,6 +263,11 @@ class ApiApplication:
         delivery: DeliveryService,
         entitlements: EntitlementRepository,
         clock: Callable[[], datetime],
+        checkout: CheckoutService,
+        stripe: StripeProvider,
+        bepaid: BePaidProvider,
+        orders: OrderRepository,
+        operator_refund_key: SecretStr,
         lifespan: Lifespan | None = None,
     ) -> None:
         self._environment = environment
@@ -221,6 +276,11 @@ class ApiApplication:
         self._delivery = delivery
         self._entitlements = entitlements
         self._clock = clock
+        self._checkout = checkout
+        self._stripe = stripe
+        self._bepaid = bepaid
+        self._orders = orders
+        self._operator_refund_key = operator_refund_key
         self._lifespan = lifespan
         self._page = StorefrontPage()
 
@@ -242,6 +302,19 @@ class ApiApplication:
             methods=['POST'],
         )
         app.add_api_route('/downloads/{token}', self._download, methods=['GET'])
+        app.add_api_route(
+            '/account/entitlements', self._list_entitlements, methods=['GET']
+        )
+        app.add_api_route('/account/orders', self._list_orders, methods=['GET'])
+        app.add_api_route(
+            '/account/orders/{order_id}', self._get_order, methods=['GET']
+        )
+        app.add_api_route('/checkout/start', self._checkout_start, methods=['POST'])
+        app.add_api_route('/webhooks/stripe', self._stripe_webhook, methods=['POST'])
+        app.add_api_route('/webhooks/bepaid', self._bepaid_webhook, methods=['POST'])
+        app.add_api_route(
+            '/ops/orders/{order_id}/refund', self._operator_refund, methods=['POST']
+        )
         return app
 
     async def _health(self) -> dict[str, str]:
@@ -255,9 +328,9 @@ class ApiApplication:
     async def _issue_grant(self, candidate_id: str, request: Request) -> JSONResponse:
         """Issue a short-lived download grant for an entitled buyer.
 
-        Buyer identity is taken from the temporary ``X-Buyer-Id`` header until
-        account auth lands in task 5.5; that task must replace this stand-in and
-        extend this wiring rather than rewrite the grant routes.
+        Buyer identity is taken from the temporary ``X-Buyer-Id`` header.
+        Saleor/customer session auth is deferred to storefront work (group 6);
+        this route keeps the stand-in rather than inventing a session store.
         """
         buyer_id = self._require_buyer_id(request)
         if buyer_id is None:
@@ -282,8 +355,8 @@ class ApiApplication:
     async def _download(self, token: str, request: Request) -> Response:
         """Serve bytes for a verified grant.
 
-        Buyer identity is taken from the temporary ``X-Buyer-Id`` header until
-        account auth lands in task 5.5.
+        Buyer identity is taken from the temporary ``X-Buyer-Id`` header.
+        Saleor/customer session auth is deferred to storefront work (group 6).
         """
         buyer_id = self._require_buyer_id(request)
         if buyer_id is None:
@@ -309,6 +382,146 @@ class ApiApplication:
             headers={'Content-Disposition': f'attachment; filename="{filename}"'},
         )
 
+    async def _list_entitlements(self, request: Request) -> JSONResponse:
+        buyer_id = self._require_buyer_id(request)
+        if buyer_id is None:
+            return JSONResponse(
+                {'detail': 'missing or empty X-Buyer-Id header'},
+                status_code=401,
+            )
+        rows = await self._entitlements.for_buyer(buyer_id)
+        return JSONResponse([self._entitlement_payload(row) for row in rows])
+
+    async def _list_orders(self, request: Request) -> JSONResponse:
+        buyer_id = self._require_buyer_id(request)
+        if buyer_id is None:
+            return JSONResponse(
+                {'detail': 'missing or empty X-Buyer-Id header'},
+                status_code=401,
+            )
+        orders = await self._orders.orders_for_buyer(buyer_id)
+        return JSONResponse([order.model_dump(mode='json') for order in orders])
+
+    async def _get_order(self, order_id: str, request: Request) -> JSONResponse:
+        buyer_id = self._require_buyer_id(request)
+        if buyer_id is None:
+            return JSONResponse(
+                {'detail': 'missing or empty X-Buyer-Id header'},
+                status_code=401,
+            )
+        order = await self._orders.by_order_id(order_id)
+        if order is None or order.buyer_id != buyer_id:
+            return JSONResponse({'detail': 'order not found'}, status_code=404)
+        return JSONResponse(order.model_dump(mode='json'))
+
+    async def _checkout_start(
+        self, request: Request, body: CheckoutStartBody
+    ) -> JSONResponse:
+        """Start payment for the posted cart lines.
+
+        There is no server-side cart table in this change: the client POSTs the
+        lines (task 5.5 R5 / design of Cart as a value object).
+        """
+        buyer_id = self._require_buyer_id(request)
+        if buyer_id is None:
+            return JSONResponse(
+                {'detail': 'missing or empty X-Buyer-Id header'},
+                status_code=401,
+            )
+        cart = Cart(
+            buyer_id=buyer_id,
+            currency=body.currency,
+            lines=tuple(
+                CartLine(
+                    candidate_id=line.candidate_id,
+                    unit_amount=line.unit_amount,
+                    quantity=line.quantity,
+                )
+                for line in body.lines
+            ),
+        )
+        # CheckoutRefusedError is the documented refusal contract of
+        # CheckoutService.start; PaymentProviderError is the provider start
+        # failure. Mapping them to HTTP is the boundary's job (rule 03:
+        # interface translation where a traceback is not useful).
+        try:
+            order, payment = await self._checkout.start(
+                cart, body.provider_id, body.return_url, self._clock()
+            )
+        except CheckoutRefusedError as error:
+            return JSONResponse({'detail': str(error)}, status_code=403)
+        except PaymentProviderError as error:
+            return JSONResponse({'detail': str(error)}, status_code=502)
+        return JSONResponse(
+            {
+                'order_id': order.order_id,
+                'redirect_url': payment.redirect_url,
+                'provider_reference': payment.provider_reference,
+                'state': order.state.value,
+            }
+        )
+
+    async def _stripe_webhook(self, request: Request) -> JSONResponse:
+        payload = await request.body()
+        signature = request.headers.get(self.STRIPE_SIGNATURE_HEADER, '')
+        # PaymentNotificationError is the documented auth/parse failure of
+        # StripeProvider.parse_notification; CheckoutRefusedError is confirm's
+        # refusal. Mapping them to HTTP is the boundary's job (rule 03).
+        try:
+            confirmation = self._stripe.parse_notification(payload, signature)
+        except PaymentNotificationError as error:
+            return JSONResponse({'detail': str(error)}, status_code=400)
+        try:
+            await self._checkout.confirm(confirmation, self._clock())
+        except CheckoutRefusedError as error:
+            return JSONResponse({'detail': str(error)}, status_code=403)
+        return JSONResponse({'ok': True})
+
+    async def _bepaid_webhook(self, request: Request) -> JSONResponse:
+        payload = await request.body()
+        signature = request.headers.get(self.BEPAID_SIGNATURE_HEADER)
+        authorization = request.headers.get(self.AUTHORIZATION_HEADER)
+        # PaymentNotificationError is the documented auth/parse failure of
+        # BePaidProvider.parse_notification; CheckoutRefusedError is confirm's
+        # refusal. Mapping them to HTTP is the boundary's job (rule 03).
+        try:
+            confirmation = self._bepaid.parse_notification(
+                payload, signature, authorization
+            )
+        except PaymentNotificationError as error:
+            return JSONResponse({'detail': str(error)}, status_code=400)
+        try:
+            await self._checkout.confirm(confirmation, self._clock())
+        except CheckoutRefusedError as error:
+            return JSONResponse({'detail': str(error)}, status_code=403)
+        return JSONResponse({'ok': True})
+
+    async def _operator_refund(
+        self, order_id: str, request: Request, body: RefundBody
+    ) -> JSONResponse:
+        if not self._operator_key_matches(request):
+            return JSONResponse(
+                {'detail': 'missing or invalid X-Operator-Key header'},
+                status_code=401,
+            )
+        # CheckoutRefusedError is the documented refusal contract of
+        # CheckoutService.refund; mapping it to HTTP is the boundary's job
+        # (rule 03).
+        try:
+            order = await self._checkout.refund(order_id, body.reason, self._clock())
+        except CheckoutRefusedError as error:
+            return JSONResponse({'detail': str(error)}, status_code=403)
+        return JSONResponse(order.model_dump(mode='json'))
+
+    def _operator_key_matches(self, request: Request) -> bool:
+        if self.OPERATOR_HEADER not in request.headers:
+            return False
+        provided = request.headers[self.OPERATOR_HEADER]
+        if provided == '':
+            return False
+        expected = self._operator_refund_key.get_secret_value()
+        return hmac.compare_digest(provided, expected)
+
     def _require_buyer_id(self, request: Request) -> str | None:
         if self.BUYER_HEADER not in request.headers:
             return None
@@ -316,6 +529,21 @@ class ApiApplication:
         if buyer_id == '':
             return None
         return buyer_id
+
+    @staticmethod
+    def _entitlement_payload(row: Entitlement) -> dict[str, object]:
+        payload: dict[str, object] = {
+            'buyer_id': row.buyer_id,
+            'candidate_id': row.candidate_id,
+            'order_id': row.order_id,
+            'granted_at': ApiApplication._format_instant(row.granted_at),
+            'state': row.state.value,
+        }
+        if row.revocation_reason is not None:
+            payload['revocation_reason'] = row.revocation_reason
+        if row.revoked_at is not None:
+            payload['revoked_at'] = ApiApplication._format_instant(row.revoked_at)
+        return payload
 
     @staticmethod
     def _format_instant(instant: datetime) -> str:

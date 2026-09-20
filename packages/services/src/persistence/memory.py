@@ -161,6 +161,11 @@ class InMemoryStore:
             return None
         return self._orders.get(order_id)
 
+    async def orders_for_buyer(self, buyer_id: str) -> tuple[Order, ...]:
+        return self._in_order_created_order(
+            order for order in self._orders.values() if order.buyer_id == buyer_id
+        )
+
     def order_ids(self) -> tuple[str, ...]:
         return tuple(self._orders)
 
@@ -170,6 +175,12 @@ class InMemoryStore:
         key = (order.provider_id, order.provider_reference)
         if self._orders_by_provider_ref.get(key) == order.order_id:
             del self._orders_by_provider_ref[key]
+
+    @staticmethod
+    def _in_order_created_order(orders: Iterable[Order]) -> tuple[Order, ...]:
+        """Most recently created first, ``order_id`` breaking a tie."""
+        by_id = sorted(orders, key=lambda order: order.order_id)
+        return tuple(sorted(by_id, key=lambda order: order.created_at, reverse=True))
 
     @staticmethod
     def _in_catalogue_order(entries: Iterable[CatalogueEntry]) -> tuple[CatalogueEntry, ...]:

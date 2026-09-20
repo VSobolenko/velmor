@@ -103,6 +103,43 @@ class TestOrderRepository:
         assert not isinstance(await store.by_id(shared_id), Order)
         assert not isinstance(await store.by_order_id(shared_id), Category)
 
+    async def test_for_buyer_returns_only_that_buyers_orders(self) -> None:
+        store = InMemoryStore()
+        mine = build_order('order-mine', provider_reference='ref-mine')
+        other = build_order('order-other', provider_reference='ref-other').model_copy(
+            update={'buyer_id': 'buyer-2'}
+        )
+        await store.save_order(mine)
+        await store.save_order(other)
+
+        assert await store.orders_for_buyer('buyer-1') == (mine,)
+
+    async def test_for_buyer_is_most_recently_created_first(self) -> None:
+        store = InMemoryStore()
+        older = build_order('order-older').model_copy(
+            update={'created_at': datetime(2026, 9, 19, 12, 0, tzinfo=timezone.utc)}
+        )
+        newer = build_order(
+            'order-newer',
+            provider_id='fake',
+            provider_reference='ref-2',
+        ).model_copy(
+            update={'created_at': datetime(2026, 9, 21, 12, 0, tzinfo=timezone.utc)}
+        )
+        await store.save_order(older)
+        await store.save_order(newer)
+
+        assert await store.orders_for_buyer('buyer-1') == (newer, older)
+
+    async def test_for_buyer_breaks_ties_by_order_id(self) -> None:
+        store = InMemoryStore()
+        first = build_order('order-a', provider_reference='ref-a')
+        second = build_order('order-b', provider_reference='ref-b')
+        await store.save_order(second)
+        await store.save_order(first)
+
+        assert await store.orders_for_buyer('buyer-1') == (first, second)
+
 
 class TestOrderRepositoryConformance:
     def test_the_in_memory_store_satisfies_order_repository(self) -> None:
@@ -122,4 +159,9 @@ class TestOrderRepositoryConformance:
 
             async def by_order_id(self, order_id: str) -> Order | None: ...
 
+            async def by_provider_reference(
+                self, provider_id: str, provider_reference: str
+            ) -> Order | None: ...
+
         assert not isinstance(Incomplete(), OrderRepository)
+

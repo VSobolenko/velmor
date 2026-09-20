@@ -408,6 +408,19 @@ class PostgresStore:
             return None
         return Order.model_validate(row['order'])
 
+    async def orders_for_buyer(self, buyer_id: str) -> tuple[Order, ...]:
+        statement = (
+            select(Schema.orders.c.order)
+            .where(Schema.orders.c.buyer_id == buyer_id)
+            .order_by(
+                Schema.orders.c.created_at.desc(),
+                Schema.orders.c.order_id.asc(),
+            )
+        )
+        async with self._session_factory() as session:
+            rows = (await session.execute(statement)).mappings().all()
+        return tuple(Order.model_validate(row['order']) for row in rows)
+
     @staticmethod
     def _row_for(candidate: Candidate) -> dict:
         return {

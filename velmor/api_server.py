@@ -2,8 +2,9 @@
 
 The server is wired here rather than through ``Container``: it runs no agent, so
 it has no checkpoint store to open, no schema to create and no HTTP client of its
-own to fetch pages with. It needs a store, delivery collaborators, and the
-catalogue query, and the composition root is the one place allowed to decide that.
+own to fetch pages with. It needs a store, delivery collaborators, payment
+providers, checkout, and the catalogue query, and the composition root is the
+one place allowed to decide that.
 """
 
 from __future__ import annotations
@@ -21,8 +22,11 @@ from packages.api.src.configs.settings import CommerceSettings
 from packages.core.src.bootstrap.observability import Observability
 from packages.core.src.bootstrap.settings_loader import SettingsLoader
 from packages.services.src.commerce.asset_cache import AssetCache
+from packages.services.src.commerce.checkout import CheckoutService
 from packages.services.src.commerce.delivery import DeliveryService
 from packages.services.src.commerce.grants import DeliveryGrantService
+from packages.services.src.payments.bepaid_provider import BePaidProvider
+from packages.services.src.payments.stripe_provider import StripeProvider
 from packages.services.src.persistence.postgres import PostgresStore
 
 
@@ -62,6 +66,25 @@ class ApiServer:
             secret=self._settings.delivery_grant_secret,
             lifetime_seconds=self._settings.delivery_grant_lifetime_seconds,
         )
+        stripe = StripeProvider(
+            secret_key=self._settings.stripe_secret_key,
+            webhook_secret=self._settings.stripe_webhook_signing_secret,
+            http=http,
+        )
+        bepaid = BePaidProvider(
+            shop_id=self._settings.bepaid_shop_id,
+            secret_key=self._settings.bepaid_secret_key,
+            public_key_pem=self._settings.bepaid_public_key,
+            http=http,
+            notification_url=self._settings.bepaid_notification_url,
+        )
+        checkout = CheckoutService(
+            entries=store,
+            disclosures=store,
+            orders=store,
+            entitlements=store,
+            providers={'stripe': stripe, 'bepaid': bepaid},
+        )
 
         @asynccontextmanager
         async def lifespan(_app: FastAPI):
@@ -77,5 +100,10 @@ class ApiServer:
             delivery=delivery,
             entitlements=store,
             clock=lambda: datetime.now(UTC),
+            checkout=checkout,
+            stripe=stripe,
+            bepaid=bepaid,
+            orders=store,
+            operator_refund_key=self._settings.operator_refund_key,
             lifespan=lifespan,
         ).build()

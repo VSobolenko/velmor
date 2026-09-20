@@ -219,3 +219,12 @@ class OrderRepository(Protocol):
     ) -> Order | None:
         """The order correlated with this provider payment id, or ``None``."""
         ...
+
+    async def orders_for_buyer(self, buyer_id: str) -> tuple[Order, ...]:
+        """Orders for this buyer, most recent ``created_at`` first, then ``order_id``.
+
+        Task 5.5 asked for ``for_buyer``; that name is already taken by
+        ``EntitlementRepository.for_buyer`` on the shared store, so this method
+        follows the same disambiguation as ``save_order`` / ``by_order_id``.
+        """
+        ...
