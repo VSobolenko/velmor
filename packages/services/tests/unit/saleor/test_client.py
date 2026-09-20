@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Awaitable, Callable
 from decimal import Decimal
 
 import httpx
@@ -55,6 +56,51 @@ ORDER_READ = {
         }
     }
 }
+
+# Every mutation, with the payload field Saleor answers under and the entity that
+# payload carries. A refusal is answered the same way by all six, so each is
+# driven through the same two cases: a mutation left out of the handling would
+# otherwise pass unnoticed.
+MutationCall = Callable[[SaleorClient], Awaitable[object]]
+
+MUTATIONS: tuple[tuple[str, str, str, MutationCall], ...] = (
+    (
+        'create_product',
+        'productCreate',
+        'product',
+        lambda client: client.create_product('Lantern', 'lantern', PRODUCT_TYPE_ID, None),
+    ),
+    (
+        'update_product',
+        'productUpdate',
+        'product',
+        lambda client: client.update_product(PRODUCT_ID, 'Lantern', 'lantern', None),
+    ),
+    (
+        'create_variant',
+        'productVariantCreate',
+        'productVariant',
+        lambda client: client.create_variant(PRODUCT_ID, 'LANTERN-1'),
+    ),
+    (
+        'update_variant',
+        'productVariantUpdate',
+        'productVariant',
+        lambda client: client.update_variant(VARIANT_ID, 'LANTERN-2'),
+    ),
+    (
+        'create_category',
+        'categoryCreate',
+        'category',
+        lambda client: client.create_category('Photographs', 'photographs'),
+    ),
+    (
+        'delete_category',
+        'categoryDelete',
+        'category',
+        lambda client: client.delete_category(CATEGORY_ID),
+    ),
+)
 
 
 class StubTransport:
@@ -323,3 +369,90 @@ class TestTokenHandling:
             for name, value in vars(client).items():
                 assert TOKEN not in repr(value), name
                 assert TOKEN not in str(value), name
+
+
+class TestPayloadRefusals:
+    """A mutation's refusal is HTTP 200 with the reason in its own payload.
+
+    `pytest.raises(SaleorGraphQLError)` is itself the assertion that no
+    `pydantic.ValidationError` escapes: the two are unrelated types, so a
+    validation failure would not satisfy the `raises` and the case would fail.
+    """
+
+    @pytest.mark.parametrize(('operation', 'mutation_field', 'entity_field', 'call'), MUTATIONS)
+    async def test_a_refused_mutation_raises_the_typed_error(
+        self,
+        operation: str,
+        mutation_field: str,
+        entity_field: str,
+        call: MutationCall,
+    ) -> None:
+        reason = f'{operation} was refused'
+        stub = StubTransport(
+            {
+                'data': {
+                    mutation_field: {
+                        entity_field: None,
+                        'errors': [{'message': reason, 'field': 'slug', 'code': 'UNIQUE'}],
+                    }
+                }
+            }
+        )
+
+        async with httpx.AsyncClient(transport=httpx.MockTransport(stub)) as http:
+            with pytest.raises(SaleorGraphQLError) as raised:
+                await call(build_client(http))
+
+        assert reason in str(raised.value)
+        assert type(raised.value) is SaleorGraphQLError
+
+    @pytest.mark.parametrize(('operation', 'mutation_field', 'entity_field', 'call'), MUTATIONS)
+    async def test_a_mutation_accepted_without_an_entity_is_reported(
+        self,
+        operation: str,
+        mutation_field: str,
+        entity_field: str,
+        call: MutationCall,
+    ) -> None:
+        stub = StubTransport({'data': {mutation_field: {entity_field: None, 'errors': []}}})
+
+        async with httpx.AsyncClient(transport=httpx.MockTransport(stub)) as http:
+            with pytest.raises(SaleorGraphQLError) as raised:
+                await call(build_client(http))
+
+        assert 'returned no entity' in str(raised.value)
+        assert type(raised.value) is SaleorGraphQLError
+
+
+class TestUnknownOrder:
+    async def test_an_unknown_order_id_is_reported_with_the_id(self) -> None:
+        stub = StubTransport({'data': {'order': None}})
+
+        async with httpx.AsyncClient(transport=httpx.MockTransport(stub)) as http:
+            with pytest.raises(SaleorGraphQLError) as raised:
+                await build_client(http).read_order(ORDER_ID)
+
+        assert ORDER_ID in str(raised.value)
+        assert type(raised.value) is SaleorGraphQLError
+
+
+class TestRealShapedErrors:
+    async def test_an_error_entry_carrying_field_code_and_level_parses(self) -> None:
+        stub = StubTransport(
+            {
+                'errors': [
+                    {
+                        'message': 'Invalid input.',
+                        'field': 'slug',
+                        'code': 'UNIQUE',
+                        'level': 'ERROR',
+                    }
+                ]
+            }
+        )
+
+        async with httpx.AsyncClient(transport=httpx.MockTransport(stub)) as http:
+            with pytest.raises(SaleorGraphQLError) as raised:
+                await build_client(http).create_category('Photographs', 'photographs')
+
+        assert 'Invalid input.' in str(raised.value)

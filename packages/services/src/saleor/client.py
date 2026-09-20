@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from abc import ABC, abstractmethod
 from decimal import Decimal
 from typing import Generic, TypeVar
 
@@ -14,7 +15,14 @@ from packages.services.src.saleor.errors import (
 
 
 class GraphQLError(BaseModel):
-    """One entry of a GraphQL ``errors`` array."""
+    """One entry of a GraphQL ``errors`` array.
+
+    Saleor sends ``field``, ``code`` and ``level`` beside ``message``, so unknown
+    keys are ignored rather than refused: a real refusal must not fail validation
+    over keys this client has no use for.
+    """
+
+    model_config = {'extra': 'ignore'}
 
     message: str
 
@@ -23,6 +31,29 @@ class SaleorNode(BaseModel):
     """A node read only for its identity."""
 
     id: str
+
+
+class MutationPayload(BaseModel, ABC):
+    """One mutation's answer: the entity it produced, or the reason it refused.
+
+    Saleor's documented shape for every mutation is an entity or ``null`` beside
+    ``errors``. A business refusal - a duplicate slug, an invalid input, a
+    category that cannot be deleted - is answered HTTP 200, with no top-level
+    ``errors``, an entity of ``null`` and the reason here. A refusal is therefore
+    data that has to be refused deliberately: typing the entity as required would
+    instead let Pydantic turn a refusal into a ``ValidationError``, which is a
+    third-party exception escaping the boundary this client exists to create.
+
+    ``entity`` is how the entity is read without inspecting the payload to learn
+    its shape; refusing it is ``SaleorClient``'s job, because the operation name
+    is known there.
+    """
+
+    errors: tuple[GraphQLError, ...] = ()
+
+    @abstractmethod
+    def entity(self) -> SaleorNode | None:
+        """The node Saleor returned, or ``None`` when it returned none."""
 
 
 DataT = TypeVar('DataT')
@@ -60,16 +91,22 @@ class ProductTypesData(BaseModel):
     productTypes: ProductTypeConnection
 
 
-class ProductTypeCreatePayload(BaseModel):
-    productType: SaleorNode
+class ProductTypeCreatePayload(MutationPayload):
+    productType: SaleorNode | None
+
+    def entity(self) -> SaleorNode | None:
+        return self.productType
 
 
 class ProductTypeCreateData(BaseModel):
     productTypeCreate: ProductTypeCreatePayload
 
 
-class ProductPayload(BaseModel):
-    product: SaleorNode
+class ProductPayload(MutationPayload):
+    product: SaleorNode | None
+
+    def entity(self) -> SaleorNode | None:
+        return self.product
 
 
 class ProductCreateData(BaseModel):
@@ -80,8 +117,11 @@ class ProductUpdateData(BaseModel):
     productUpdate: ProductPayload
 
 
-class VariantPayload(BaseModel):
-    productVariant: SaleorNode
+class VariantPayload(MutationPayload):
+    productVariant: SaleorNode | None
+
+    def entity(self) -> SaleorNode | None:
+        return self.productVariant
 
 
 class ProductVariantCreateData(BaseModel):
@@ -92,8 +132,11 @@ class ProductVariantUpdateData(BaseModel):
     productVariantUpdate: VariantPayload
 
 
-class CategoryPayload(BaseModel):
-    category: SaleorNode
+class CategoryPayload(MutationPayload):
+    category: SaleorNode | None
+
+    def entity(self) -> SaleorNode | None:
+        return self.category
 
 
 class CategoryCreateData(BaseModel):
@@ -126,7 +169,7 @@ class OrderNode(BaseModel):
 
 
 class OrderData(BaseModel):
-    order: OrderNode
+    order: OrderNode | None
 
 
 class SaleorProduct(BaseModel):
@@ -317,7 +360,7 @@ class SaleorClient:
             {'input': {'name': name}},
             ProductTypeCreateData,
         )
-        return created.productTypeCreate.productType.id
+        return self._accepted_entity('ensure_product_type', created.productTypeCreate).id
 
     async def create_product(
         self, name: str, slug: str, product_type_id: str, category_id: str | None
@@ -336,7 +379,9 @@ class SaleorClient:
             },
             ProductCreateData,
         )
-        return SaleorProduct(product_id=data.productCreate.product.id)
+        return SaleorProduct(
+            product_id=self._accepted_entity('create_product', data.productCreate).id
+        )
 
     async def update_product(
         self, product_id: str, name: str, slug: str, category_id: str | None
@@ -351,7 +396,9 @@ class SaleorClient:
             },
             ProductUpdateData,
         )
-        return SaleorProduct(product_id=data.productUpdate.product.id)
+        return SaleorProduct(
+            product_id=self._accepted_entity('update_product', data.productUpdate).id
+        )
 
     async def create_variant(self, product_id: str, sku: str) -> SaleorVariant:
         """Create a variant of the given product."""
@@ -361,7 +408,8 @@ class SaleorClient:
             {'input': {'product': product_id, 'sku': sku}},
             ProductVariantCreateData,
         )
-        return SaleorVariant(variant_id=data.productVariantCreate.productVariant.id)
+        entity = self._accepted_entity('create_variant', data.productVariantCreate)
+        return SaleorVariant(variant_id=entity.id)
 
     async def update_variant(self, variant_id: str, sku: str) -> SaleorVariant:
         """Update a variant's stock keeping unit."""
@@ -371,7 +419,8 @@ class SaleorClient:
             {'id': variant_id, 'input': {'sku': sku}},
             ProductVariantUpdateData,
         )
-        return SaleorVariant(variant_id=data.productVariantUpdate.productVariant.id)
+        entity = self._accepted_entity('update_variant', data.productVariantUpdate)
+        return SaleorVariant(variant_id=entity.id)
 
     async def create_category(self, name: str, slug: str) -> SaleorCategory:
         """Create a category."""
@@ -381,20 +430,22 @@ class SaleorClient:
             {'input': {'name': name, 'slug': slug}},
             CategoryCreateData,
         )
-        return SaleorCategory(category_id=data.categoryCreate.category.id)
+        entity = self._accepted_entity('create_category', data.categoryCreate)
+        return SaleorCategory(category_id=entity.id)
 
     async def delete_category(self, category_id: str) -> None:
         """Delete a category.
 
-        Nothing is returned: whether the operation was accepted is stated by the
-        envelope, and a refusal raises like any other refused operation.
+        Nothing is returned; the check is the point, so a refusal or an answer
+        carrying no category is raised like any other refused operation.
         """
-        await self._execute(
+        data = await self._execute(
             'delete_category',
             self.CATEGORY_DELETE_MUTATION,
             {'id': category_id},
             CategoryDeleteData,
         )
+        self._accepted_entity('delete_category', data.categoryDelete)
 
     async def read_order(self, order_id: str) -> SaleorOrder:
         """Read an order's identity, state, total and line variants."""
@@ -405,6 +456,8 @@ class SaleorClient:
             OrderData,
         )
         order = data.order
+        if order is None:
+            raise SaleorGraphQLError(f'read_order found no order with id {order_id}')
         return SaleorOrder(
             order_id=order.id,
             number=order.number,
@@ -452,7 +505,7 @@ class SaleorClient:
         envelope = GraphQLEnvelope[data_model].model_validate(response.json())
         if envelope.errors:
             raise SaleorGraphQLError(
-                f'{operation} was refused by Saleor: {self._messages(envelope.errors)}'
+                f'{operation} was refused by Saleor: {self._render(envelope.errors)}'
             )
         if envelope.data is None:
             raise SaleorGraphQLError(
@@ -461,5 +514,22 @@ class SaleorClient:
         return envelope.data
 
     @staticmethod
-    def _messages(errors: tuple[GraphQLError, ...]) -> str:
+    def _accepted_entity(operation: str, payload: MutationPayload) -> SaleorNode:
+        """The entity the mutation produced, or the reason it produced none.
+
+        Every mutation answer is read through here, so a refusal in the payload
+        is refused deliberately instead of arriving as a validation failure.
+        """
+        if payload.errors:
+            raise SaleorGraphQLError(
+                f'{operation} was refused by Saleor: {SaleorClient._render(payload.errors)}'
+            )
+        entity = payload.entity()
+        if entity is None:
+            raise SaleorGraphQLError(f'{operation} was accepted by Saleor but returned no entity')
+        return entity
+
+    @staticmethod
+    def _render(errors: tuple[GraphQLError, ...]) -> str:
+        """Saleor's own messages, joined so an operator sees why it refused."""
         return '; '.join(error.message for error in errors)
