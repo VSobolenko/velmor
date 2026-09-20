@@ -1,0 +1,47 @@
+.page {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.header {
+  padding: 2.5rem 1.5rem 1.5rem;
+  background: #14161a;
+  color: #ffffff;
+}
+
+.brand {
+  margin: 0;
+  font-size: 1.75rem;
+  font-weight: 650;
+  letter-spacing: -0.02em;
+}
+
+.tagline {
+  margin: 0.35rem 0 0;
+  color: #b9bfc9;
+  font-size: 0.95rem;
+}
+
+.main {
+  padding: 2rem 1.5rem 3rem;
+  max-width: 40rem;
+}
+
+.heading {
+  margin: 0 0 0.75rem;
+  font-size: 1.1rem;
+  font-weight: 600;
+}
+
+.status {
+  margin: 0;
+  color: #1d6b37;
+  font-family: var(--font-geist-mono), ui-monospace, monospace;
+}
+
+.error {
+  margin: 0;
+  color: #8a2f2f;
+  font-family: var(--font-geist-mono), ui-monospace, monospace;
+}
