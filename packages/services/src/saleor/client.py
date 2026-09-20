@@ -233,7 +233,6 @@ class SaleorClient:
     this client only carries out the operation it was handed.
     """
 
-    GRAPHQL_PATH = '/graphql/'
     AUTH_FAILURE_STATUSES: frozenset[int] = frozenset({401, 403})
     HTTP_ERROR_FLOOR = 400
 
@@ -555,8 +554,10 @@ class SaleorClient:
         failure below stays the only exception this class catches.
         """
         try:
+            # ``api_url`` is the full GraphQL endpoint (``.../graphql/``), matching
+            # ``CommerceSettings.saleor_api_url`` / ``SALEOR_API_URL``.
             response = await self._http.post(
-                f'{self._api_url}{self.GRAPHQL_PATH}',
+                self._api_url,
                 json={'query': query, 'variables': variables},
                 headers={'Authorization': f'Bearer {self._app_token.get_secret_value()}'},
             )

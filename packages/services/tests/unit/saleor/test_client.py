@@ -21,7 +21,7 @@ from packages.services.src.saleor.errors import (
     SaleorTransportError,
 )
 
-API_URL = 'https://saleor.test'
+API_URL = 'https://saleor.test/graphql/'
 TOKEN = 'saleor-app-token-7f3a'
 PRODUCT_TYPE_ID = 'UHJvZHVjdFR5cGU6MQ=='
 PRODUCT_ID = 'UHJvZHVjdDox'
@@ -174,7 +174,7 @@ def request_body(request: httpx.Request) -> dict:
 def assert_graphql_request(request: httpx.Request, operation_field: str) -> dict:
     """Every operation must reach the one endpoint, authorised, with its own query."""
     assert request.method == 'POST'
-    assert str(request.url) == f'{API_URL}/graphql/'
+    assert str(request.url) == API_URL
     assert request.headers['Authorization'] == f'Bearer {TOKEN}'
     body = request_body(request)
     assert operation_field in body['query']
