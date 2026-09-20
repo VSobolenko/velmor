@@ -27,6 +27,7 @@ class TestCommerceSettings:
         'STRIPE_WEBHOOK_SIGNING_SECRET': 'stripe-webhook-secret-literal',
         'BEPAID_SHOP_ID': 'bepaid-shop-id-literal',
         'BEPAID_SECRET_KEY': 'bepaid-secret-key-literal',
+        'BEPAID_PUBLIC_KEY': '-----BEGIN PUBLIC KEY----- test-pem -----END PUBLIC KEY-----',
         'STOREFRONT_DOMAIN': 'shop.example.test',
         'DELIVERY_GRANT_SECRET': 'delivery-grant-secret-literal',
         'DELIVERY_GRANT_LIFETIME_SECONDS': '900',
@@ -62,6 +63,7 @@ class TestCommerceSettings:
 
         assert settings.saleor_api_url == self.COMMERCE_VALUES['SALEOR_API_URL']
         assert settings.bepaid_shop_id == self.COMMERCE_VALUES['BEPAID_SHOP_ID']
+        assert settings.bepaid_public_key == self.COMMERCE_VALUES['BEPAID_PUBLIC_KEY']
         assert settings.storefront_domain == self.COMMERCE_VALUES['STOREFRONT_DOMAIN']
         assert settings.delivery_grant_lifetime_seconds == 900
         assert settings.delivery_cache_max_bytes == 268435456
