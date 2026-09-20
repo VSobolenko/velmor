@@ -9,6 +9,7 @@ from packages.services.src.domain.catalogue import CatalogueEntry, CatalogueEntr
 from packages.services.src.domain.license import StorefrontListing
 
 PUBLISHED_AT = datetime(2026, 9, 20, 9, 0, tzinfo=timezone.utc)
+FIXTURE_DIGEST = '00' * 32
 
 
 def build_entry(
@@ -23,6 +24,7 @@ def build_entry(
     state: CatalogueEntryState = CatalogueEntryState.PUBLISHED,
     withdrawal_reason: str | None = None,
     published_at: datetime = PUBLISHED_AT,
+    content_digest: str = FIXTURE_DIGEST,
 ) -> CatalogueEntry:
     return CatalogueEntry(
         candidate_id=candidate_id,
@@ -36,6 +38,7 @@ def build_entry(
         state=state,
         withdrawal_reason=withdrawal_reason,
         published_at=published_at,
+        content_digest=content_digest,
     )
 
 
@@ -63,6 +66,7 @@ class TestCatalogueEntry:
         assert entry.listing is StorefrontListing.PAID_OK
         assert entry.state is CatalogueEntryState.PUBLISHED
         assert entry.published_at == PUBLISHED_AT
+        assert entry.content_digest == FIXTURE_DIGEST
 
     def test_the_optional_fields_default_to_none(self) -> None:
         entry = CatalogueEntry(
@@ -74,6 +78,7 @@ class TestCatalogueEntry:
             listing=StorefrontListing.PAID_OK,
             state=CatalogueEntryState.PUBLISHED,
             published_at=PUBLISHED_AT,
+            content_digest=FIXTURE_DIGEST,
         )
 
         assert entry.category_id is None
@@ -115,6 +120,20 @@ class TestCatalogueEntry:
                 saleor_product_id='UHJvZHVjdDox',
                 saleor_variant_id='UHJvZHVjdFZhcmlhbnQ6MQ==',
                 obligations=(),
+                state=CatalogueEntryState.PUBLISHED,
+                published_at=PUBLISHED_AT,
+            )
+
+
+    def test_a_missing_content_digest_is_rejected(self) -> None:
+        with pytest.raises(ValidationError):
+            CatalogueEntry(
+                candidate_id='openverse:1',
+                source_id='openverse',
+                saleor_product_id='UHJvZHVjdDox',
+                saleor_variant_id='UHJvZHVjdFZhcmlhbnQ6MQ==',
+                obligations=(),
+                listing=StorefrontListing.PAID_OK,
                 state=CatalogueEntryState.PUBLISHED,
                 published_at=PUBLISHED_AT,
             )

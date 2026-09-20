@@ -30,6 +30,10 @@ class CatalogueEntry(BaseModel):
     record, and ``listing`` is the ``StorefrontListing`` the decision held, which
     the checkout consults before it prices the good.
 
+    ``content_digest`` is the SHA-256 hex digest of the origin bytes hashed at
+    publication. An entry without a digest is not representable: delivery
+    verifies against it, so deny-by-default forbids publishing without one.
+
     ``category_id``, ``license_id`` and ``withdrawal_reason`` are optional
     because each is absent until the operation that sets it runs: a good may be
     published before it is categorised, a record may carry no resolved licence
@@ -49,3 +53,4 @@ class CatalogueEntry(BaseModel):
     state: CatalogueEntryState
     withdrawal_reason: str | None = None
     published_at: datetime
+    content_digest: str

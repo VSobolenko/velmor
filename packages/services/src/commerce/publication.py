@@ -5,11 +5,13 @@ from typing import Protocol
 
 from packages.services.src.commerce.errors import (
     CategoryNotFoundError,
+    DigestUnavailableError,
     PublicationSourceMismatchError,
 )
 from packages.services.src.commerce.slugs import ProductSlug
 from packages.services.src.domain.candidate import Candidate
 from packages.services.src.domain.catalogue import CatalogueEntry, CatalogueEntryState
+from packages.services.src.domain.digest import DigestResult
 from packages.services.src.domain.gate import GateDecision
 from packages.services.src.domain.license import StorefrontListing
 from packages.services.src.domain.publication import PublicationAction, PublicationOutcome
@@ -42,12 +44,19 @@ class SaleorPublicationPort(Protocol):
     async def update_variant(self, variant_id: str, sku: str) -> SaleorVariant: ...
 
 
+class ContentDigestPort(Protocol):
+    """Obtain an origin content digest for a publishable candidate."""
+
+    async def obtain(self, download_url: str) -> DigestResult: ...
+
+
 class PublicationBridge:
     """Turn a settled gate decision into a paid catalogue entry, or withdraw one.
 
     The bridge consults ``PublicationGate.listing_for`` and never calls
-    ``decide``: publishability is an input. It does not download content, assign
-    categories, or delete Saleor products on withdrawal.
+    ``decide``: publishability is an input. It does not assign categories or
+    delete Saleor products on withdrawal. Every path that ends PUBLISHED obtains
+    a content digest first; an unobtainable digest is a publication refusal.
     """
 
     def __init__(
@@ -56,11 +65,13 @@ class PublicationBridge:
         saleor: SaleorPublicationPort,
         entries: CatalogueEntryRepository,
         categories: CategoryRepository,
+        digest: ContentDigestPort,
     ) -> None:
         self._gate = gate
         self._saleor = saleor
         self._entries = entries
         self._categories = categories
+        self._digest = digest
 
     async def apply(
         self,
@@ -144,14 +155,52 @@ class PublicationBridge:
         existing: CatalogueEntry | None,
         now: datetime,
     ) -> PublicationOutcome:
+        digest_or_refusal = await self._digest_for_publish(candidate)
+        if isinstance(digest_or_refusal, PublicationOutcome):
+            return digest_or_refusal
         if existing is None:
-            return await self._create_published(candidate, decision, now)
+            return await self._create_published(
+                candidate, decision, now, digest_or_refusal
+            )
         if existing.state is CatalogueEntryState.WITHDRAWN:
-            return await self._re_publish(candidate, decision, existing)
-        return await self._update_published(candidate, decision, existing)
+            return await self._re_publish(
+                candidate, decision, existing, digest_or_refusal
+            )
+        return await self._update_published(
+            candidate, decision, existing, digest_or_refusal
+        )
+
+    async def _digest_for_publish(
+        self, candidate: Candidate
+    ) -> DigestResult | PublicationOutcome:
+        if candidate.download_url is None:
+            return PublicationOutcome(
+                candidate_id=candidate.id,
+                action=PublicationAction.REFUSED,
+                reasons=('no download URL is available for a digest',),
+                entry=None,
+            )
+        # Authorized catch (rule 03 case 3): catalog-publication requires an
+        # outcome for every operation. DigestUnavailableError is the typed
+        # domain signal that the digest could not be obtained; translating it
+        # into REFUSED *is* the refusal logic, not a transport catch. httpx
+        # RequestError stays inside ContentDigest.
+        try:
+            return await self._digest.obtain(candidate.download_url)
+        except DigestUnavailableError as error:
+            return PublicationOutcome(
+                candidate_id=candidate.id,
+                action=PublicationAction.REFUSED,
+                reasons=(str(error),),
+                entry=None,
+            )
 
     async def _create_published(
-        self, candidate: Candidate, decision: GateDecision, now: datetime
+        self,
+        candidate: Candidate,
+        decision: GateDecision,
+        now: datetime,
+        digest: DigestResult,
     ) -> PublicationOutcome:
         slug = ProductSlug.for_candidate(candidate.id)
         sku = self._sku_for(candidate.id)
@@ -175,6 +224,7 @@ class PublicationBridge:
             state=CatalogueEntryState.PUBLISHED,
             withdrawal_reason=None,
             published_at=now,
+            content_digest=digest.digest,
         )
         await self._entries.save_entry(entry)
         return PublicationOutcome(
@@ -189,6 +239,7 @@ class PublicationBridge:
         candidate: Candidate,
         decision: GateDecision,
         existing: CatalogueEntry,
+        digest: DigestResult,
     ) -> PublicationOutcome:
         slug = ProductSlug.for_candidate(candidate.id)
         sku = self._sku_for(candidate.id)
@@ -212,6 +263,7 @@ class PublicationBridge:
             state=CatalogueEntryState.PUBLISHED,
             withdrawal_reason=None,
             published_at=existing.published_at,
+            content_digest=digest.digest,
         )
         await self._entries.save_entry(entry)
         return PublicationOutcome(
@@ -226,6 +278,7 @@ class PublicationBridge:
         candidate: Candidate,
         decision: GateDecision,
         existing: CatalogueEntry,
+        digest: DigestResult,
     ) -> PublicationOutcome:
         slug = ProductSlug.for_candidate(candidate.id)
         sku = self._sku_for(candidate.id)
@@ -249,6 +302,7 @@ class PublicationBridge:
             state=CatalogueEntryState.PUBLISHED,
             withdrawal_reason=None,
             published_at=existing.published_at,
+            content_digest=digest.digest,
         )
         await self._entries.save_entry(entry)
         return PublicationOutcome(
@@ -273,6 +327,7 @@ class PublicationBridge:
             state=CatalogueEntryState.WITHDRAWN,
             withdrawal_reason=reason,
             published_at=existing.published_at,
+            content_digest=existing.content_digest,
         )
         await self._entries.save_entry(entry)
         return PublicationOutcome(

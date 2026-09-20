@@ -29,3 +29,11 @@ class CatalogueEntryNotFoundError(VelmorError):
 
 class CatalogueEntryNotPublishedError(VelmorError):
     """Assign or unassign targeted an entry that is not PUBLISHED."""
+
+
+class DigestUnavailableError(VelmorError):
+    """The origin digest could not be obtained; publication must refuse."""
+
+
+class AssetCacheError(VelmorError):
+    """The small-file cache refused or could not complete an operation."""

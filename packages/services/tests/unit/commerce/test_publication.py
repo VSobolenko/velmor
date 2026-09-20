@@ -32,6 +32,31 @@ PAID_OBLIGATIONS: tuple[str, ...] = (
     'Indicate whether changes were made',
 )
 
+FIXTURE_DIGEST = '00' * 32
+REAL_DIGEST = 'aa' * 32
+
+
+class FakeDigest:
+    """Records obtain calls and returns a configured result or raises."""
+
+    def __init__(
+        self,
+        digest: str = REAL_DIGEST,
+        *,
+        error: Exception | None = None,
+    ) -> None:
+        self.digest = digest
+        self.error = error
+        self.urls: list[str] = []
+
+    async def obtain(self, download_url: str):
+        from packages.services.src.domain.digest import DigestResult
+
+        self.urls.append(download_url)
+        if self.error is not None:
+            raise self.error
+        return DigestResult(digest=self.digest, size_bytes=12, cached=False)
+
 
 class FakeSaleor:
     """Records Saleor calls and returns stable product and variant ids."""
@@ -140,6 +165,7 @@ def published_entry(
         state=CatalogueEntryState.PUBLISHED,
         withdrawal_reason=None,
         published_at=published_at,
+        content_digest=FIXTURE_DIGEST,
     )
 
 
@@ -159,6 +185,7 @@ def withdrawn_entry(
         state=CatalogueEntryState.WITHDRAWN,
         withdrawal_reason=reason,
         published_at=EARLIER,
+        content_digest=FIXTURE_DIGEST,
     )
 
 
@@ -173,8 +200,20 @@ def store() -> InMemoryStore:
 
 
 @pytest.fixture
-def bridge(gate: PublicationGate, saleor: FakeSaleor, store: InMemoryStore) -> PublicationBridge:
-    return PublicationBridge(gate=gate, saleor=saleor, entries=store, categories=store)
+def digest() -> FakeDigest:
+    return FakeDigest()
+
+
+@pytest.fixture
+def bridge(
+    gate: PublicationGate,
+    saleor: FakeSaleor,
+    store: InMemoryStore,
+    digest: FakeDigest,
+) -> PublicationBridge:
+    return PublicationBridge(
+        gate=gate, saleor=saleor, entries=store, categories=store, digest=digest
+    )
 
 
 @pytest.fixture
@@ -213,6 +252,7 @@ class TestPublicationBridge:
         assert outcome.entry.published_at == NOW
         assert outcome.entry.withdrawal_reason is None
         assert outcome.entry.category_id is None
+        assert outcome.entry.content_digest == REAL_DIGEST
         assert await store.by_candidate(candidate.id) == outcome.entry
         assert [call[0] for call in saleor.calls] == [
             'ensure_product_type',
@@ -399,11 +439,12 @@ class TestPublicationBridge:
         assert outcome.entry.candidate_id == candidate.id
         assert outcome.entry.source_id == candidate.source_id
 
-    async def test_publish_does_not_read_download_url(
+    async def test_publish_without_download_url_is_refused(
         self,
         bridge: PublicationBridge,
         saleor: FakeSaleor,
         store: InMemoryStore,
+        digest: FakeDigest,
         spec: SourceSpec,
     ) -> None:
         candidate = build_candidate()
@@ -412,21 +453,98 @@ class TestPublicationBridge:
 
         outcome = await bridge.apply(candidate, decision, spec, NOW)
 
+        assert outcome.action is PublicationAction.REFUSED
+        assert outcome.entry is None
+        assert await store.by_candidate(candidate.id) is None
+        assert saleor.calls == []
+        assert digest.urls == []
+        assert any('download' in reason.lower() for reason in outcome.reasons)
+
+    async def test_successful_publish_records_digest_and_calls_obtain(
+        self,
+        bridge: PublicationBridge,
+        saleor: FakeSaleor,
+        digest: FakeDigest,
+        candidate: Candidate,
+        spec: SourceSpec,
+    ) -> None:
+        decision = publishable_decision()
+
+        outcome = await bridge.apply(candidate, decision, spec, NOW)
+
         assert outcome.action is PublicationAction.PUBLISHED
         assert outcome.entry is not None
-        assert await store.by_candidate(candidate.id) is not None
-        assert saleor.calls != []
-        assert all(
-            call[0]
-            in {
-                'ensure_product_type',
-                'create_product',
-                'create_variant',
-                'update_product',
-                'update_variant',
-            }
-            for call in saleor.calls
+        assert outcome.entry.content_digest == REAL_DIGEST
+        assert digest.urls == [candidate.download_url]
+        assert any(call[0] == 'create_product' for call in saleor.calls)
+
+    async def test_digest_unavailable_refuses_create(
+        self,
+        gate: PublicationGate,
+        saleor: FakeSaleor,
+        store: InMemoryStore,
+        candidate: Candidate,
+        spec: SourceSpec,
+    ) -> None:
+        from packages.services.src.commerce.errors import DigestUnavailableError
+
+        digest = FakeDigest(error=DigestUnavailableError('origin returned HTTP 500'))
+        bridge = PublicationBridge(
+            gate=gate, saleor=saleor, entries=store, categories=store, digest=digest
         )
+        decision = publishable_decision()
+
+        outcome = await bridge.apply(candidate, decision, spec, NOW)
+
+        assert outcome.action is PublicationAction.REFUSED
+        assert outcome.entry is None
+        assert await store.by_candidate(candidate.id) is None
+        assert saleor.calls == []
+        assert digest.urls == [candidate.download_url]
+        assert any('500' in reason or 'origin' in reason.lower() for reason in outcome.reasons)
+
+    async def test_digest_unavailable_on_update_leaves_entry_unchanged(
+        self,
+        gate: PublicationGate,
+        saleor: FakeSaleor,
+        store: InMemoryStore,
+        candidate: Candidate,
+        spec: SourceSpec,
+    ) -> None:
+        from packages.services.src.commerce.errors import DigestUnavailableError
+
+        existing = published_entry()
+        await store.save_entry(existing)
+        digest = FakeDigest(error=DigestUnavailableError('origin returned HTTP 404'))
+        bridge = PublicationBridge(
+            gate=gate, saleor=saleor, entries=store, categories=store, digest=digest
+        )
+        decision = publishable_decision()
+
+        outcome = await bridge.apply(candidate, decision, spec, NOW)
+
+        assert outcome.action is PublicationAction.REFUSED
+        assert saleor.calls == []
+        assert await store.by_candidate(candidate.id) == existing
+        assert any('404' in reason or 'origin' in reason.lower() for reason in outcome.reasons)
+
+    async def test_rights_refused_skips_digest(
+        self,
+        bridge: PublicationBridge,
+        saleor: FakeSaleor,
+        digest: FakeDigest,
+        store: InMemoryStore,
+        candidate: Candidate,
+        spec: SourceSpec,
+    ) -> None:
+        decision = refused_decision()
+
+        outcome = await bridge.apply(candidate, decision, spec, NOW)
+
+        assert outcome.action is PublicationAction.REFUSED
+        assert digest.urls == []
+        assert saleor.calls == []
+        assert await store.by_candidate(candidate.id) is None
 
     async def test_update_after_assign_sends_saleor_category_id(
         self,

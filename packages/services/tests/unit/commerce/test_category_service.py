@@ -66,6 +66,7 @@ def published_entry(
         state=CatalogueEntryState.PUBLISHED,
         withdrawal_reason=None,
         published_at=EARLIER,
+        content_digest='00' * 32,
     )
 
 
@@ -82,6 +83,7 @@ def withdrawn_entry(candidate_id: str = 'openverse:1') -> CatalogueEntry:
         state=CatalogueEntryState.WITHDRAWN,
         withdrawal_reason='withdrawn for test',
         published_at=EARLIER,
+        content_digest='00' * 32,
     )
 
 

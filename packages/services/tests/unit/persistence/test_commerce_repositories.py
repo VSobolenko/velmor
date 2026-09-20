@@ -64,6 +64,7 @@ def build_entry(
         state=state,
         withdrawal_reason=withdrawal_reason,
         published_at=published_at,
+        content_digest='00' * 32,
     )
 
 
