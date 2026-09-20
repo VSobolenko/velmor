@@ -14,6 +14,7 @@ class OrderState(StrEnum):
     PAID = 'paid'
     FAILED = 'failed'
     CANCELLED = 'cancelled'
+    REFUNDED = 'refunded'
 
 
 class OrderLine(BaseModel):

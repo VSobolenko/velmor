@@ -102,6 +102,21 @@ class CheckoutService:
         await self._grant_entitlements(paid, now)
         return paid
 
+    async def refund(self, order_id: str, reason: str, now: datetime) -> Order:
+        order = await self._orders.by_order_id(order_id)
+        if order is None:
+            raise CheckoutRefusedError(f'order {order_id} is unknown')
+        if order.state is OrderState.REFUNDED:
+            return order
+        if order.state is not OrderState.PAID:
+            raise CheckoutRefusedError(
+                f'order {order.order_id} cannot be refunded ({order.state.value})'
+            )
+        await self._revoke_entitlements(order, reason, now)
+        refunded = order.model_copy(update={'state': OrderState.REFUNDED})
+        await self._orders.save_order(refunded)
+        return refunded
+
     async def _require_complete_disclosure(self) -> None:
         missing = self._disclosure_check.incomplete(await self._disclosures.current())
         if missing == ():
@@ -207,3 +222,25 @@ class CheckoutService:
                     revocation_reason=None,
                 )
             )
+
+    async def _revoke_entitlements(
+        self, order: Order, reason: str, now: datetime
+    ) -> None:
+        for line in order.lines:
+            rows = await self._entitlements.for_buyer_candidate(
+                order.buyer_id, line.candidate_id
+            )
+            for row in rows:
+                if row.order_id != order.order_id:
+                    continue
+                if row.state is not EntitlementState.ACTIVE:
+                    continue
+                await self._entitlements.save_entitlement(
+                    row.model_copy(
+                        update={
+                            'state': EntitlementState.REVOKED,
+                            'revoked_at': now,
+                            'revocation_reason': reason,
+                        }
+                    )
+                )
