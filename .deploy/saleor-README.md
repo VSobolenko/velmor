@@ -1,6 +1,8 @@
 # Saleor on the Velmor host
 
 Deploys Saleor API, one Celery worker (with embedded beat), and the dashboard.
+Images: `ghcr.io/saleor/saleor:3.22.66` (API + worker),
+`ghcr.io/saleor/saleor-dashboard:3.22.42` (dashboard patch tags differ from core).
 Reuses `velmor-postgres` and `velmor-redis`. Does not modify `/opt/pikupo` or Caddy.
 
 ## Limits (design D11)

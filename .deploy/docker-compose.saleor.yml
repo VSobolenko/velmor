@@ -64,7 +64,7 @@ services:
         max-file: '3'
 
   saleor-dashboard:
-    image: ghcr.io/saleor/saleor-dashboard:3.22.66
+    image: ghcr.io/saleor/saleor-dashboard:3.22.42
     container_name: velmor-saleor-dashboard
     restart: unless-stopped
     environment:
