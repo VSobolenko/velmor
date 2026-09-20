@@ -33,6 +33,14 @@ class CandidateRepository(Protocol):
         """Candidates that have no rights record yet, oldest first."""
         ...
 
+    async def by_candidate_id(self, candidate_id: str) -> Candidate | None:
+        """The candidate with this id, or ``None`` if it was never stored.
+
+        Named ``by_candidate_id`` rather than ``by_id`` so it does not collide
+        with ``CategoryRepository.by_id`` on the shared store.
+        """
+        ...
+
 
 class RightsRecordRepository(Protocol):
     """Storage for verdicts, kept apart from candidate storage on purpose.

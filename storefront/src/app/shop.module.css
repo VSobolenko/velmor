@@ -1,0 +1,151 @@
+.page {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.header {
+  padding: 2.5rem 1.5rem 1.5rem;
+  background: #14161a;
+  color: #ffffff;
+}
+
+.brand {
+  margin: 0;
+  font-size: 1.75rem;
+  font-weight: 650;
+  letter-spacing: -0.02em;
+}
+
+.brand a {
+  color: inherit;
+}
+
+.tagline {
+  margin: 0.35rem 0 0;
+  color: #b9bfc9;
+  font-size: 0.95rem;
+}
+
+.nav {
+  margin-top: 1rem;
+  display: flex;
+  gap: 1rem;
+  font-size: 0.9rem;
+}
+
+.nav a {
+  color: #b9bfc9;
+}
+
+.nav a:hover {
+  color: #ffffff;
+}
+
+.main {
+  padding: 2rem 1.5rem 3rem;
+  max-width: 44rem;
+  width: 100%;
+}
+
+.heading {
+  margin: 0 0 0.75rem;
+  font-size: 1.25rem;
+  font-weight: 600;
+}
+
+.subheading {
+  margin: 1.75rem 0 0.75rem;
+  font-size: 1.05rem;
+  font-weight: 600;
+}
+
+.list {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+}
+
+.list a {
+  color: #1a5fb4;
+}
+
+.list a:hover {
+  text-decoration: underline;
+}
+
+.meta {
+  margin: 0.25rem 0 0;
+  color: #626a76;
+  font-size: 0.9rem;
+}
+
+.empty {
+  margin: 0;
+  color: #626a76;
+}
+
+.status {
+  margin: 0.5rem 0 0;
+  color: #626a76;
+  font-size: 0.85rem;
+  font-family: var(--font-geist-mono), ui-monospace, monospace;
+}
+
+.error {
+  margin: 0;
+  color: #8a2f2f;
+  font-family: var(--font-geist-mono), ui-monospace, monospace;
+}
+
+.price {
+  margin: 1rem 0;
+  font-size: 1.15rem;
+  font-weight: 600;
+}
+
+.license {
+  margin: 1.25rem 0 0.35rem;
+  font-size: 0.74rem;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: #767d89;
+}
+
+.licenseValue {
+  margin: 0;
+  font-weight: 600;
+}
+
+.obligations {
+  margin: 0.75rem 0 0;
+  padding-left: 1.1rem;
+}
+
+.actions {
+  margin-top: 1.5rem;
+  display: flex;
+  gap: 0.75rem;
+  align-items: center;
+}
+
+.button {
+  appearance: none;
+  border: 1px solid #14161a;
+  background: #14161a;
+  color: #ffffff;
+  padding: 0.55rem 1rem;
+  font: inherit;
+  font-size: 0.95rem;
+  cursor: pointer;
+}
+
+.button:hover {
+  background: #2a3038;
+}
+
+.linkButton {
+  color: #1a5fb4;
+  font-size: 0.95rem;
+}

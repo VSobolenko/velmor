@@ -72,17 +72,24 @@ export type ApiErrorBody = {
   detail: string;
 };
 
-// 6.2 — catalogue browse types (no client functions yet)
-export type CatalogueItem = {
+export type CatalogueGood = {
   candidate_id: string;
   title: string;
   creator: string | null;
   license_id: string | null;
-  landing_url: string;
-  download_url: string | null;
+  obligations: string[];
+  category_id: string | null;
+  category_slug: string | null;
+  unit_amount: string;
+  currency: string;
 };
 
 export type CategorySummary = {
-  id: string;
+  category_id: string;
   name: string;
+  slug: string;
+};
+
+export type CategoryDetail = CategorySummary & {
+  goods: CatalogueGood[];
 };

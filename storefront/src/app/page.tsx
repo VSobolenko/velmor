@@ -1,50 +1,102 @@
-import { CommerceApiClient, CommerceApiError } from "@/lib/api";
-import styles from "./page.module.css";
+import Link from "next/link";
+import {
+  CommerceApiClient,
+  CommerceApiError,
+  type CatalogueGood,
+  type CategorySummary,
+} from "@/lib/api";
+import styles from "./shop.module.css";
 
 export const dynamic = "force-dynamic";
 
-type HealthView =
-  | { kind: "ok"; status: string; environment: string }
+type HomeData =
+  | {
+      kind: "ok";
+      categories: CategorySummary[];
+      goods: CatalogueGood[];
+      health: string;
+    }
   | { kind: "error"; message: string };
 
-async function loadHealth(): Promise<HealthView> {
+async function loadHome(): Promise<HomeData> {
   const client = CommerceApiClient.fromEnv();
-  const health = await client.getHealth();
+  const [categories, goods, health] = await Promise.all([
+    client.listCategories(),
+    client.listGoods(),
+    client.getHealth(),
+  ]);
   return {
     kind: "ok",
-    status: health.status,
-    environment: health.environment,
+    categories,
+    goods: goods.slice(0, 12),
+    health: `${health.status} (${health.environment})`,
   };
 }
 
 export default async function Home() {
-  let view: HealthView;
+  let data: HomeData;
   try {
-    view = await loadHealth();
+    data = await loadHome();
   } catch (error) {
     if (error instanceof CommerceApiError) {
-      view = { kind: "error", message: error.detail };
+      data = { kind: "error", message: error.detail };
     } else if (error instanceof Error) {
-      view = { kind: "error", message: error.message };
+      data = { kind: "error", message: error.message };
     } else {
-      view = { kind: "error", message: "health check failed" };
+      data = { kind: "error", message: "catalogue unavailable" };
     }
   }
 
   return (
     <div className={styles.page}>
       <header className={styles.header}>
-        <p className={styles.brand}>Proofbasket</p>
-        <p className={styles.tagline}>Velmor shop</p>
+        <p className={styles.brand}>
+          <Link href="/">Proofbasket</Link>
+        </p>
+        <p className={styles.tagline}>Goods that passed the Velmor rights gate</p>
+        <nav className={styles.nav}>
+          <Link href="/cart">Cart</Link>
+        </nav>
       </header>
       <main className={styles.main}>
-        <h1 className={styles.heading}>API status</h1>
-        {view.kind === "ok" ? (
-          <p className={styles.status}>
-            {view.status} ({view.environment})
-          </p>
+        {data.kind === "error" ? (
+          <p className={styles.error}>{data.message}</p>
         ) : (
-          <p className={styles.error}>{view.message}</p>
+          <>
+            <h1 className={styles.heading}>Categories</h1>
+            {data.categories.length === 0 ? (
+              <p className={styles.empty}>No categories yet.</p>
+            ) : (
+              <ul className={styles.list}>
+                {data.categories.map((category) => (
+                  <li key={category.category_id}>
+                    <Link href={`/categories/${category.slug}`}>
+                      {category.name}
+                    </Link>
+                  </li>
+                ))}
+              </ul>
+            )}
+            <h2 className={styles.subheading}>Recent goods</h2>
+            {data.goods.length === 0 ? (
+              <p className={styles.empty}>Nothing in the catalogue yet.</p>
+            ) : (
+              <ul className={styles.list}>
+                {data.goods.map((good) => (
+                  <li key={good.candidate_id}>
+                    <Link href={`/goods/${encodeURIComponent(good.candidate_id)}`}>
+                      {good.title}
+                    </Link>
+                    <p className={styles.meta}>
+                      {good.unit_amount} {good.currency}
+                      {good.license_id !== null ? ` · ${good.license_id}` : ""}
+                    </p>
+                  </li>
+                ))}
+              </ul>
+            )}
+            <p className={styles.status}>{data.health}</p>
+          </>
         )}
       </main>
     </div>

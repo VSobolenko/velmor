@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from decimal import Decimal
 from pathlib import Path
 
 import httpx
@@ -27,6 +28,8 @@ Good = tuple[Candidate, RightsRecord]
 _GRANT_SECRET = SecretStr('storefront-unit-grant-secret')
 _OPERATOR_KEY = SecretStr('storefront-unit-operator-key')
 _NOW = datetime(2026, 9, 20, 12, 0, tzinfo=UTC)
+_UNIT_AMOUNT = Decimal('9.99')
+_CURRENCY = 'BYN'
 
 
 class FakeCatalog:
@@ -89,6 +92,11 @@ def build_client(
         bepaid=bepaid,
         orders=store,
         operator_refund_key=_OPERATOR_KEY,
+        entries=store,
+        categories=store,
+        candidates=store,
+        catalogue_unit_amount=_UNIT_AMOUNT,
+        catalogue_currency=_CURRENCY,
     ).build()
     return TestClient(app), catalog
 

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 from datetime import UTC, datetime
+from decimal import Decimal
 from pathlib import Path
 
 import httpx
@@ -37,6 +38,8 @@ LIFETIME = 900
 BUYER_HEADER = 'X-Buyer-Id'
 OPERATOR_KEY = SecretStr('api-unit-operator-refund-key')
 BEPAID_NOTIFICATION = 'https://shop.example/webhooks/bepaid'
+CATALOGUE_UNIT_AMOUNT = Decimal('9.99')
+CATALOGUE_CURRENCY = 'BYN'
 
 
 class FixedClock:
@@ -136,6 +139,11 @@ class DownloadHarness:
                 bepaid=bepaid,
                 orders=self.store,
                 operator_refund_key=OPERATOR_KEY,
+                entries=self.store,
+                categories=self.store,
+                candidates=self.store,
+                catalogue_unit_amount=CATALOGUE_UNIT_AMOUNT,
+                catalogue_currency=CATALOGUE_CURRENCY,
             ).build()
         )
 

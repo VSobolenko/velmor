@@ -105,5 +105,10 @@ class ApiServer:
             bepaid=bepaid,
             orders=store,
             operator_refund_key=self._settings.operator_refund_key,
+            entries=store,
+            categories=store,
+            candidates=store,
+            catalogue_unit_amount=self._settings.catalogue_unit_amount,
+            catalogue_currency=self._settings.catalogue_currency,
             lifespan=lifespan,
         ).build()

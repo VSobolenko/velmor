@@ -77,6 +77,14 @@ class PostgresStore:
             rows = (await session.execute(statement)).mappings().all()
         return tuple(self._candidate_from(row) for row in rows)
 
+    async def by_candidate_id(self, candidate_id: str) -> Candidate | None:
+        statement = select(Schema.candidates).where(Schema.candidates.c.id == candidate_id)
+        async with self._session_factory() as session:
+            row = (await session.execute(statement)).mappings().one_or_none()
+        if row is None:
+            return None
+        return self._candidate_from(row)
+
     async def published(self, limit: int) -> tuple[tuple[Candidate, RightsRecord], ...]:
         """Publishable goods, most recently decided first.
 

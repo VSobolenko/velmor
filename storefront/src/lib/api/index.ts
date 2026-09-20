@@ -1,7 +1,8 @@
 export { CommerceApiClient, CommerceApiError } from "./client";
 export type {
   ApiErrorBody,
-  CatalogueItem,
+  CatalogueGood,
+  CategoryDetail,
   CategorySummary,
   CheckoutLineRequest,
   CheckoutStartRequest,

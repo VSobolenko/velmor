@@ -56,6 +56,9 @@ class InMemoryStore:
         ]
         return tuple(pending[:limit])
 
+    async def by_candidate_id(self, candidate_id: str) -> Candidate | None:
+        return self._candidates.get(candidate_id)
+
     async def save(self, decision: GateDecision) -> None:
         self._decisions[decision.candidate_id] = decision
 

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from decimal import Decimal
 from pathlib import Path
 
 from pydantic import SecretStr
@@ -38,3 +39,8 @@ class CommerceSettings(PlatformSettings):
         )
         self.delivery_cache_max_bytes: int = loader.required_int('DELIVERY_CACHE_MAX_BYTES')
         self.delivery_cache_dir: Path = loader.required_path('DELIVERY_CACHE_DIR')
+        # Flat catalogue price until per-good pricing exists on CatalogueEntry.
+        self.catalogue_unit_amount: Decimal = Decimal(
+            loader.required_str('CATALOGUE_UNIT_AMOUNT')
+        )
+        self.catalogue_currency: str = loader.required_str('CATALOGUE_CURRENCY')

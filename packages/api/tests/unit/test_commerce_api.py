@@ -207,6 +207,11 @@ class CommerceHarness:
                 bepaid=self.bepaid,
                 orders=self.store,
                 operator_refund_key=OPERATOR_KEY,
+                entries=self.store,
+                categories=self.store,
+                candidates=self.store,
+                catalogue_unit_amount=UNIT_AMOUNT,
+                catalogue_currency=CURRENCY,
             ).build()
         )
 

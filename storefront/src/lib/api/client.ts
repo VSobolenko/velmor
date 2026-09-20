@@ -1,4 +1,7 @@
 import type {
+  CatalogueGood,
+  CategoryDetail,
+  CategorySummary,
   CheckoutStartRequest,
   CheckoutStartResponse,
   Entitlement,
@@ -46,6 +49,34 @@ export class CommerceApiClient {
     return this.requestJson<HealthResponse>("GET", "/health", false);
   }
 
+  async listCategories(): Promise<CategorySummary[]> {
+    return this.requestJson<CategorySummary[]>(
+      "GET",
+      "/catalogue/categories",
+      false,
+    );
+  }
+
+  async getCategory(slug: string): Promise<CategoryDetail> {
+    return this.requestJson<CategoryDetail>(
+      "GET",
+      `/catalogue/categories/${encodeURIComponent(slug)}`,
+      false,
+    );
+  }
+
+  async listGoods(): Promise<CatalogueGood[]> {
+    return this.requestJson<CatalogueGood[]>("GET", "/catalogue/goods", false);
+  }
+
+  async getGood(candidateId: string): Promise<CatalogueGood> {
+    return this.requestJson<CatalogueGood>(
+      "GET",
+      `/catalogue/goods/${encodeURIComponent(candidateId)}`,
+      false,
+    );
+  }
+
   async startCheckout(
     body: CheckoutStartRequest,
   ): Promise<CheckoutStartResponse> {
@@ -85,8 +116,6 @@ export class CommerceApiClient {
   downloadUrl(token: string): string {
     return `${this.baseUrl}/downloads/${encodeURIComponent(token)}`;
   }
-
-  // 6.2 — listCatalogue / listCategories
 
   private async requestJson<T>(
     method: string,

@@ -30,7 +30,10 @@ from packages.services.src.commerce.errors import (
 from packages.services.src.commerce.grants import DeliveryGrantService
 from packages.services.src.domain.candidate import Candidate
 from packages.services.src.domain.cart import Cart, CartLine
+from packages.services.src.domain.catalogue import CatalogueEntry, CatalogueEntryState
+from packages.services.src.domain.category import Category
 from packages.services.src.domain.entitlement import Entitlement, EntitlementState
+from packages.services.src.domain.license import StorefrontListing
 from packages.services.src.domain.rights import RightsRecord
 from packages.services.src.payments.bepaid_provider import BePaidProvider
 from packages.services.src.payments.errors import (
@@ -39,6 +42,9 @@ from packages.services.src.payments.errors import (
 )
 from packages.services.src.payments.stripe_provider import StripeProvider
 from packages.services.src.persistence.contract import (
+    CandidateRepository,
+    CatalogueEntryRepository,
+    CategoryRepository,
     EntitlementRepository,
     OrderRepository,
     StorefrontCatalog,
@@ -249,6 +255,7 @@ class ApiApplication:
     """
 
     CATALOGUE_LIMIT = 100
+    BROWSE_LIMIT = 200
     BUYER_HEADER = 'x-buyer-id'
     OPERATOR_HEADER = 'x-operator-key'
     STRIPE_SIGNATURE_HEADER = 'stripe-signature'
@@ -268,6 +275,11 @@ class ApiApplication:
         bepaid: BePaidProvider,
         orders: OrderRepository,
         operator_refund_key: SecretStr,
+        entries: CatalogueEntryRepository,
+        categories: CategoryRepository,
+        candidates: CandidateRepository,
+        catalogue_unit_amount: Decimal,
+        catalogue_currency: str,
         lifespan: Lifespan | None = None,
     ) -> None:
         self._environment = environment
@@ -281,6 +293,11 @@ class ApiApplication:
         self._bepaid = bepaid
         self._orders = orders
         self._operator_refund_key = operator_refund_key
+        self._entries = entries
+        self._categories = categories
+        self._candidates = candidates
+        self._catalogue_unit_amount = catalogue_unit_amount
+        self._catalogue_currency = catalogue_currency
         self._lifespan = lifespan
         self._page = StorefrontPage()
 
@@ -295,6 +312,16 @@ class ApiApplication:
         app.add_api_route('/health', self._health, methods=['GET'])
         app.add_api_route(
             '/', self._storefront, methods=['GET'], response_class=HTMLResponse
+        )
+        app.add_api_route(
+            '/catalogue/categories', self._list_categories, methods=['GET']
+        )
+        app.add_api_route(
+            '/catalogue/categories/{slug}', self._get_category, methods=['GET']
+        )
+        app.add_api_route('/catalogue/goods', self._list_goods, methods=['GET'])
+        app.add_api_route(
+            '/catalogue/goods/{candidate_id}', self._get_good, methods=['GET']
         )
         app.add_api_route(
             '/account/goods/{candidate_id}/grant',
@@ -324,6 +351,82 @@ class ApiApplication:
         goods = await self._catalog.published(self.CATALOGUE_LIMIT)
         total = await self._catalog.published_count()
         return HTMLResponse(self._page.render(goods, total))
+
+    async def _list_categories(self) -> JSONResponse:
+        categories = await self._categories.all()
+        return JSONResponse(
+            [self._category_summary(category) for category in categories]
+        )
+
+    async def _get_category(self, slug: str) -> JSONResponse:
+        category = await self._categories.by_slug(slug)
+        if category is None:
+            return JSONResponse({'detail': 'category not found'}, status_code=404)
+        entries = await self._entries.by_category(category.category_id)
+        goods = [
+            await self._product_dto(entry)
+            for entry in entries
+            if self._is_saleable(entry)
+        ]
+        return JSONResponse(
+            {
+                **self._category_summary(category),
+                'goods': goods,
+            }
+        )
+
+    async def _list_goods(self) -> JSONResponse:
+        entries = await self._entries.entries(self.BROWSE_LIMIT)
+        goods = [
+            await self._product_dto(entry)
+            for entry in entries
+            if self._is_saleable(entry)
+        ]
+        return JSONResponse(goods)
+
+    async def _get_good(self, candidate_id: str) -> JSONResponse:
+        entry = await self._entries.by_candidate(candidate_id)
+        if entry is None or not self._is_saleable(entry):
+            return JSONResponse({'detail': 'good not found'}, status_code=404)
+        return JSONResponse(await self._product_dto(entry))
+
+    @staticmethod
+    def _is_saleable(entry: CatalogueEntry) -> bool:
+        return (
+            entry.state is CatalogueEntryState.PUBLISHED
+            and entry.listing is StorefrontListing.PAID_OK
+        )
+
+    @staticmethod
+    def _category_summary(category: Category) -> dict[str, str]:
+        return {
+            'category_id': category.category_id,
+            'name': category.name,
+            'slug': category.slug,
+        }
+
+    async def _product_dto(self, entry: CatalogueEntry) -> dict[str, object]:
+        candidate = await self._candidates.by_candidate_id(entry.candidate_id)
+        if candidate is None:
+            raise RuntimeError(
+                f'catalogue entry {entry.candidate_id} has no candidate row'
+            )
+        category_slug: str | None = None
+        if entry.category_id is not None:
+            category = await self._categories.by_id(entry.category_id)
+            if category is not None:
+                category_slug = category.slug
+        return {
+            'candidate_id': entry.candidate_id,
+            'title': candidate.title,
+            'creator': candidate.creator,
+            'license_id': entry.license_id,
+            'obligations': list(entry.obligations),
+            'category_id': entry.category_id,
+            'category_slug': category_slug,
+            'unit_amount': format(self._catalogue_unit_amount, 'f'),
+            'currency': self._catalogue_currency,
+        }
 
     async def _issue_grant(self, candidate_id: str, request: Request) -> JSONResponse:
         """Issue a short-lived download grant for an entitled buyer.
