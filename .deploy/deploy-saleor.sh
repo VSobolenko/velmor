@@ -42,40 +42,55 @@ fi
 
 if [[ ! -f "${ENV_FILE}" ]]; then
   echo "== generating ${ENV_FILE} =="
-  SECRET_KEY="$(openssl rand -hex 48)"
-  SUPER_PASS="$(openssl rand -hex 16)"
-  RSA_PEM="$(openssl genrsa 2048 2>/dev/null | awk '{printf "%s\\n", $0}')"
   umask 077
-  cat > "${ENV_FILE}" <<EOF
-SECRET_KEY=${SECRET_KEY}
-DEBUG=False
-ALLOWED_HOSTS=127.0.0.1,localhost
-ALLOWED_CLIENT_HOSTS=127.0.0.1,localhost,http://127.0.0.1:9000
-PUBLIC_URL=http://127.0.0.1:8001/
-DEFAULT_FROM_EMAIL=noreply@localhost
-DEFAULT_CHANNEL_SLUG=default-channel
-DEFAULT_COUNTRY=US
-DEFAULT_CURRENCY=USD
-DATABASE_URL=postgres://velmor:${POSTGRES_PASSWORD}@postgres:5432/saleor
-CACHE_URL=redis://redis:6379/1
-CELERY_BROKER_URL=redis://redis:6379/1
-RSA_PRIVATE_KEY=${RSA_PEM}
-SALEOR_DASHBOARD_API_URL=http://127.0.0.1:8001/graphql/
-SALEOR_SUPERUSER_EMAIL=admin@velmor.local
-SALEOR_SUPERUSER_PASSWORD=${SUPER_PASS}
-EOF
-  chmod 600 "${ENV_FILE}"
-  echo "wrote ${ENV_FILE} (mode 600); staff password printed once below"
-  echo "SALEOR_SUPERUSER_PASSWORD=${SUPER_PASS}"
+  POSTGRES_PASSWORD="${POSTGRES_PASSWORD}" python3 - <<'PY'
+import os, secrets, subprocess, urllib.parse
+from pathlib import Path
+
+root = Path(os.environ.get("VELMOR_ROOT", "/opt/velmor"))
+env_path = root / "saleor.env"
+pg_pass = os.environ["POSTGRES_PASSWORD"]
+secret = secrets.token_hex(48)
+super_pass = secrets.token_hex(16)
+pem = subprocess.check_output(["openssl", "genrsa", "2048"], stderr=subprocess.DEVNULL).decode()
+# One-line PEM with literal \n for django-environ
+rsa_one_line = pem.strip().replace("\n", "\\n")
+db_url = "postgres://velmor:%s@postgres:5432/saleor" % urllib.parse.quote(pg_pass, safe="")
+lines = [
+    "SECRET_KEY=%s" % secret,
+    "DEBUG=False",
+    "ALLOWED_HOSTS=127.0.0.1,localhost",
+    "ALLOWED_CLIENT_HOSTS=127.0.0.1,localhost,http://127.0.0.1:9000",
+    "PUBLIC_URL=http://127.0.0.1:8001/",
+    "DEFAULT_FROM_EMAIL=noreply@localhost",
+    "DEFAULT_CHANNEL_SLUG=default-channel",
+    "DEFAULT_COUNTRY=US",
+    "DEFAULT_CURRENCY=USD",
+    "DATABASE_URL=%s" % db_url,
+    "CACHE_URL=redis://redis:6379/1",
+    "CELERY_BROKER_URL=redis://redis:6379/1",
+    "RSA_PRIVATE_KEY=%s" % rsa_one_line,
+    "SALEOR_DASHBOARD_API_URL=http://127.0.0.1:8001/graphql/",
+    "SALEOR_SUPERUSER_EMAIL=admin@velmor.local",
+    "SALEOR_SUPERUSER_PASSWORD=%s" % super_pass,
+]
+env_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+env_path.chmod(0o600)
+print("wrote", env_path, "(mode 600); staff password printed once below")
+print("SALEOR_SUPERUSER_PASSWORD=%s" % super_pass)
+PY
 else
   echo "reusing existing ${ENV_FILE}"
   chmod 600 "${ENV_FILE}"
 fi
 
-# shellcheck disable=SC1091
-set -a
-source "${ENV_FILE}"
-set +a
+# Do not source saleor.env (RSA_PRIVATE_KEY breaks bash). Read staff fields only.
+EMAIL="$(grep -E '^SALEOR_SUPERUSER_EMAIL=' "${ENV_FILE}" | head -n1 | cut -d= -f2-)"
+PASS="$(grep -E '^SALEOR_SUPERUSER_PASSWORD=' "${ENV_FILE}" | head -n1 | cut -d= -f2-)"
+if [[ -z "${EMAIL}" || -z "${PASS}" ]]; then
+  echo "SALEOR_SUPERUSER_EMAIL/PASSWORD missing in ${ENV_FILE}" >&2
+  exit 1
+fi
 
 COMPOSE=(docker compose -p "${PROJECT}" -f "${COMPOSE_FILE}" --env-file "${ENV_FILE}")
 
@@ -87,9 +102,7 @@ echo "== migrate =="
 "${COMPOSE[@]}" run --rm --no-deps saleor-api python manage.py migrate --noinput
 
 echo "== staff user =="
-EMAIL="${SALEOR_SUPERUSER_EMAIL:-admin@velmor.local}"
-PASS="${SALEOR_SUPERUSER_PASSWORD:?SALEOR_SUPERUSER_PASSWORD missing in saleor.env}"
-"${COMPOSE[@]}" run --rm --no-deps -e DJANGO_SUPERUSER_PASSWORD="${PASS}" saleor-api \
+"${COMPOSE[@]}" run --rm --no-deps saleor-api \
   python manage.py shell -c "
 from django.contrib.auth import get_user_model
 U = get_user_model()
@@ -116,7 +129,7 @@ fi
 echo "token created (or already present); do not paste the auth token into git reports"
 
 echo "== smoke =="
-sleep 5
+sleep 8
 curl -s -o /dev/null -w "health:%{http_code}\n" http://127.0.0.1:8001/health/ || true
 curl -s -X POST http://127.0.0.1:8001/graphql/ \
   -H 'Content-Type: application/json' \
