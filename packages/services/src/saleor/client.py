@@ -157,7 +157,13 @@ class TaxedMoney(BaseModel):
 
 
 class OrderLine(BaseModel):
-    variant: SaleorNode
+    """One line of an order.
+
+    ``variant`` is nullable because Saleor may return ``null`` when the variant
+    has been removed from stock entirely; a paid order must still be readable.
+    """
+
+    variant: SaleorNode | None
 
 
 class OrderNode(BaseModel):
@@ -246,6 +252,11 @@ class SaleorClient:
             productType {
               id
             }
+            errors {
+              message
+              field
+              code
+            }
           }
         }
     """
@@ -255,6 +266,11 @@ class SaleorClient:
           productCreate(input: $input) {
             product {
               id
+            }
+            errors {
+              message
+              field
+              code
             }
           }
         }
@@ -266,6 +282,11 @@ class SaleorClient:
             product {
               id
             }
+            errors {
+              message
+              field
+              code
+            }
           }
         }
     """
@@ -275,6 +296,11 @@ class SaleorClient:
           productVariantCreate(input: $input) {
             productVariant {
               id
+            }
+            errors {
+              message
+              field
+              code
             }
           }
         }
@@ -286,6 +312,11 @@ class SaleorClient:
             productVariant {
               id
             }
+            errors {
+              message
+              field
+              code
+            }
           }
         }
     """
@@ -296,6 +327,11 @@ class SaleorClient:
             category {
               id
             }
+            errors {
+              message
+              field
+              code
+            }
           }
         }
     """
@@ -305,6 +341,11 @@ class SaleorClient:
           categoryDelete(id: $id) {
             category {
               id
+            }
+            errors {
+              message
+              field
+              code
             }
           }
         }
@@ -464,7 +505,9 @@ class SaleorClient:
             status=order.status,
             currency=order.total.gross.currency,
             total=order.total.gross.amount,
-            variant_ids=tuple(line.variant.id for line in order.lines),
+            variant_ids=tuple(
+                line.variant.id for line in order.lines if line.variant is not None
+            ),
         )
 
     async def _execute(

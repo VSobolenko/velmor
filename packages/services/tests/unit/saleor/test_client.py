@@ -56,6 +56,20 @@ ORDER_READ = {
         }
     }
 }
+ORDER_WITH_NULL_VARIANT_LINE = {
+    'data': {
+        'order': {
+            'id': ORDER_ID,
+            'number': '17',
+            'status': 'UNFULFILLED',
+            'total': {'gross': {'amount': '42.50', 'currency': 'USD'}},
+            'lines': [
+                {'variant': None},
+                {'variant': {'id': VARIANT_IDS[0]}},
+            ],
+        }
+    }
+}
 
 # Every mutation, with the payload field Saleor answers under and the entity that
 # payload carries. A refusal is answered the same way by all six, so each is
@@ -158,6 +172,12 @@ def assert_graphql_request(request: httpx.Request, operation_field: str) -> dict
     body = request_body(request)
     assert operation_field in body['query']
     return body
+
+
+def assert_mutation_selects_payload_errors(query: str) -> None:
+    """The document must ask for payload errors; GraphQL returns only selected fields."""
+    compact = ' '.join(query.split())
+    assert 'errors { message field code }' in compact
 
 
 class TestTheEightOperations:
@@ -291,6 +311,57 @@ class TestTheEightOperations:
             await build_client(http).read_order(ORDER_ID)
 
         assert request_body(stub.requests[0])['variables'] == {'id': ORDER_ID}
+
+    async def test_read_order_omits_lines_whose_variant_was_removed(self) -> None:
+        stub = StubTransport(ORDER_WITH_NULL_VARIANT_LINE)
+
+        async with httpx.AsyncClient(transport=httpx.MockTransport(stub)) as http:
+            order = await build_client(http).read_order(ORDER_ID)
+
+        assert order.variant_ids == (VARIANT_IDS[0],)
+        assert_graphql_request(stub.requests[0], 'order')
+
+
+class TestMutationDocumentsSelectPayloadErrors:
+    """Every mutation document must select payload errors on the wire.
+
+    Case 9's injected JSON includes ``errors`` even when the document never
+    asked for them; this assertion is the check that the outbound query does.
+    """
+
+    async def test_product_type_create_selects_payload_errors(self) -> None:
+        stub = ProductTypeTransport()
+
+        async with httpx.AsyncClient(transport=httpx.MockTransport(stub)) as http:
+            await build_client(http).ensure_product_type('Digital goods')
+
+        creation = stub.requests[1]
+        body = assert_graphql_request(creation, 'productTypeCreate')
+        assert_mutation_selects_payload_errors(body['query'])
+
+    @pytest.mark.parametrize(('operation', 'mutation_field', 'entity_field', 'call'), MUTATIONS)
+    async def test_outbound_mutation_query_selects_payload_errors(
+        self,
+        operation: str,
+        mutation_field: str,
+        entity_field: str,
+        call: MutationCall,
+    ) -> None:
+        payloads = {
+            'productCreate': PRODUCT_CREATED,
+            'productUpdate': PRODUCT_UPDATED,
+            'productVariantCreate': VARIANT_CREATED,
+            'productVariantUpdate': VARIANT_UPDATED,
+            'categoryCreate': CATEGORY_CREATED,
+            'categoryDelete': CATEGORY_DELETED,
+        }
+        stub = StubTransport(payloads[mutation_field])
+
+        async with httpx.AsyncClient(transport=httpx.MockTransport(stub)) as http:
+            await call(build_client(http))
+
+        body = assert_graphql_request(stub.requests[0], mutation_field)
+        assert_mutation_selects_payload_errors(body['query'])
 
 
 class TestTransportFailure:
