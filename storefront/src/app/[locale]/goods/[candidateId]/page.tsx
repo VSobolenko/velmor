@@ -88,10 +88,7 @@ export default async function GoodPage({ params }: Props) {
           action={
             <Link
               className={buttonClassName("secondary")}
-              href={localePath(
-                locale,
-                `/goods/${encodeURIComponent(candidateId)}`,
-              )}
+              href={localePath(locale, `/goods/${candidateId}`)}
             >
               {dict["common.retry"]}
             </Link>

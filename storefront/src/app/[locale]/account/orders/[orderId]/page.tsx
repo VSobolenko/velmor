@@ -50,7 +50,9 @@ async function loadOrder(locale: Locale, orderId: string): Promise<OrderData> {
     const client = CommerceApiClient.fromEnv(locale);
     const order = await client.getOrder(orderId);
     const settled = await Promise.allSettled(
-      order.lines.map((line) => client.getGood(line.candidate_id)),
+      order.lines.map((line) =>
+        client.getGood(encodeURIComponent(line.candidate_id)),
+      ),
     );
     const titles = new Map<string, string | null>();
     order.lines.forEach((line, index) => {

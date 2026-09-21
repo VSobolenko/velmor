@@ -68,7 +68,9 @@ async function loadEntitlements(locale: Locale): Promise<EntitlementsData> {
   const client = CommerceApiClient.fromEnv(locale);
   const entitlements = await client.listEntitlements();
   const settled = await Promise.allSettled(
-    entitlements.map((entitlement) => client.getGood(entitlement.candidate_id)),
+    entitlements.map((entitlement) =>
+      client.getGood(encodeURIComponent(entitlement.candidate_id)),
+    ),
   );
   const rows = entitlements.map((entitlement, index) => ({
     entitlement,

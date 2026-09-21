@@ -125,13 +125,21 @@ export class CommerceApiClient {
     );
   }
 
+  /**
+   * `candidateId` is a value already valid as a URL path segment, so it is placed as-is.
+   *
+   * Encoding it here is what broke this surface. A `[candidateId]` segment reaches a `page.tsx`
+   * undecoded while a `route.ts` receives it decoded (vercel/next.js#64952, "pathParam is
+   * undecoded when used from page.tsx and useParams() but is decoded when used from route.ts"),
+   * so the product page already holds `openverse%3A...`. Encoding that again sent
+   * `openverse%253A...`, which the API answers with 404, and every product page failed: the page
+   * where a buyer buys. A caller holding a raw id from API JSON, as the account pages do, makes it
+   * a segment with `encodeURIComponent` at the call site.
+   */
   async getGood(candidateId: string): Promise<CatalogueCard> {
     return this.requestJson<CatalogueCard>(
       "GET",
-      this.cataloguePath(
-        `/catalogue/goods/${encodeURIComponent(candidateId)}`,
-        {},
-      ),
+      this.cataloguePath(`/catalogue/goods/${candidateId}`, {}),
       false,
     );
   }
