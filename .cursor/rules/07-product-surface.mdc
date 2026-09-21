@@ -1,0 +1,150 @@
+---
+description: The rules that protect the buyer-facing surface — specification, localization, imagery, layout and visual verification
+globs: storefront/**/*.tsx,storefront/**/*.ts,storefront/**/*.css,packages/api/**/*.py,openspec/changes/**/*.md
+alwaysApply: false
+---
+
+# The buyer-facing surface
+
+This rule exists because it was violated. A complete commerce layer was built —
+Saleor, payments, delivery, entitlements — and the surface a buyer actually saw
+was a list of source filenames with a price beside each one, in one hardcoded
+language, with no product image, no category, no search and no card. Every test
+passed. Every review passed. The product did not exist.
+
+The lesson is not "make it prettier". It is that **a surface which works is not a
+surface which sells**, and nothing in the old process could see the difference: a
+diff cannot show that a page has no images, and a passing suite says nothing about
+a rendered page.
+
+## Scope
+
+Anything a human reads and acts on: the storefront (`storefront/`), the API's
+buyer-facing responses (`packages/api/`), and the specs that describe them. Not
+operator CLI output, not logs, not internal error messages.
+
+## 1. The surface is specified before it is built
+
+A requirement that states behaviour ("the goods in that category are listed") can
+be satisfied by a text dump. That is exactly how the failure happened. So:
+
+- Every buyer-facing capability's spec SHALL state what the buyer **sees**, not
+  only what the system does: the layout's elements, the imagery, the copy's
+  source, and every state below.
+- `design.md` SHALL name the pattern the layout follows and its source, per
+  section 4.
+- `tasks.md` SHALL contain a task that looks at the rendered result and produces
+  screenshots as evidence. A change with a buyer-facing surface and no visual
+  verification task is incomplete, not lean.
+
+## 2. Copy is data, and no locale is hardcoded
+
+- No user-facing string literal in any component. Every one comes from the locale
+  dictionaries under `storefront/src/lib/i18n/`.
+- Every locale carries the same key set. A key missing in one locale fails the
+  storefront check before deployment.
+- The locale is negotiated (stored choice, then the browser's stated preference,
+  then the default) and changeable from every page. `<html lang>` follows it.
+- A language is never the default "because that is where the company is". The
+  default is Russian and it is chosen by a buyer who has expressed nothing, not
+  by a component that cannot express anything else.
+- Prices, dates and numbers are formatted per locale.
+
+## 3. A visual product is shown as an image
+
+- A good whose content is an image, an illustration or a photograph SHALL be shown
+  with a preview derived from it. A text-only listing for a visual product is a
+  defect, not a style choice.
+- A good with no usable image SHALL be shown with a real placeholder or with an
+  operator-attached cover. It SHALL NOT be shown as a broken tile or as text.
+- A preview SHALL be a downscaled derivative served from our host, digest-verified
+  like delivery, and SHALL NOT disclose the origin location.
+- A cover that does not depict the good SHALL be labelled as such on the product
+  page.
+
+## 4. The layout follows a recorded pattern, not invention
+
+- The canonical distilled source is `.cursor/skills/storefront-ux/SKILL.md`. Read
+  it before designing or changing a page.
+- A pattern that file does not cover SHALL be researched from a published source
+  and cited in `design.md` with what it recommends and why it applies here.
+  "I designed it" is not a source.
+- A layout rule inherited from the research is not negotiable because an
+  implementer finds it prettier the other way. If the research is wrong, cite what
+  contradicts it.
+
+## 5. The minimum bar per page
+
+A page that does not meet its bar is not finished, regardless of its tests.
+
+| Page | Minimum |
+|---|---|
+| Home | One value proposition and one primary CTA in a hero; a trust signal; category tiles so a visitor self-sorts; a bounded featured grid (at most 8 goods); how-it-works; FAQ |
+| Catalogue | A card grid, not a list of links; each card with a preview, a title, a licence badge and a price; search; sort; category and licence filters; a result count; pagination; a stated empty result with a way out |
+| Product | A complete buy box — preview, title, original title, creator, price, licence badge, add-to-cart, one trust cue — inside the first mobile viewport; file format and size; the full licence identity and every obligation; delivery and refund rules; related goods; the CTA repeated below the detail |
+| Cart | Line items with previews, quantities, removal, and a summary that states what is being paid and in what currency |
+| Checkout | Order summary, provider choice, the seller disclosure, and a required licence acknowledgement |
+| Account | Order cards with status, order detail, entitlements with a working download, and empty states that explain themselves |
+
+## 6. Every state is designed
+
+Loading, empty, error, not-found, unauthenticated and partially-configured are
+states a buyer reaches, not edge cases. Each SHALL be designed, localised and
+reachable in a test or a screenshot. A spinner that replaces a card grid, or an
+empty page that explains nothing, is a defect.
+
+## 7. Accessibility and mobile are deliverables
+
+- Every interactive control has a target of at least 44x44 px.
+- Everything is keyboard operable with a visible focus indicator. No action is
+  hover-only: a hover-only affordance does not exist on a touch device.
+- A cart change is announced through an `aria-live` region.
+- `prefers-reduced-motion` is respected.
+- A page is laid out for a 390 px viewport first. If it does not work there, it
+  does not work.
+
+## 8. One design system
+
+- Colours, spacing, radii and type come from the token set. A component names a
+  token, never a hex value.
+- Shared components live in one place and are reused. A second implementation of a
+  button, a card or a price is a defect, not a variation.
+- No page-local stylesheet duplicating what the system already provides.
+
+## 9. The surface is verified by looking at it
+
+- The evidence that a buyer-facing surface works is a screenshot of it at desktop
+  and mobile width, from the running application, quoted in the report.
+- `/ux-verify` is the gate. It is the buyer-surface analogue of `/rights-verify`,
+  and it is required before a change with a buyer-facing surface is called done.
+- A unit test, a type check, a passing build and a reviewer reading a diff are
+  not evidence about a rendered page. Say "unverified" instead of implying
+  otherwise.
+
+## Forbidden
+
+These are the concrete forms of the failure. Each is blocking, not a suggestion.
+
+- A catalogue rendered as a list of text links.
+- A title taken from a source filename and shown to a buyer unedited and
+  untruncated.
+- A hardcoded language, a hardcoded locale in `<html lang>`, or a locale that
+  cannot be changed from the page.
+- A string literal in a component that a buyer reads.
+- A good with no preview, and no placeholder either.
+- A price with no currency, or a currency with no formatting.
+- An action that exists only on hover.
+- A page whose empty, loading and error states were never considered.
+- A "done" claim about a buyer-facing surface with no screenshot.
+- A new buyer-facing page that ignores the token set and the shared components.
+
+## Enforcement
+
+| Layer | Mechanism |
+|---|---|
+| Planning | `openspec/config.yaml` rules require presentation requirements and a visual verification task |
+| Code | `.cursor/hooks/ui-guard.cjs` blocks a hardcoded locale and buyer-facing literals outside the dictionaries |
+| Knowledge | `.cursor/skills/storefront-ux/SKILL.md` |
+| Runtime gate | `/ux-verify` — drives the running shop and produces screenshots |
+| Process gate | `/ship` runs `/ux-verify` on any change with a buyer surface; `/review` requires it |
+| Harness gate | `.cursor/hooks/policy-guard.cjs` requires human approval for edits to this file |

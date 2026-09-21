@@ -73,6 +73,26 @@ class Schema:
         Column('category', JSONB, nullable=False),
     )
 
+    catalogue_presentations = Table(
+        'catalogue_presentations',
+        metadata,
+        Column('candidate_id', Text, primary_key=True),
+        Column('locale', Text, primary_key=True),
+        Column('title', Text, nullable=False),
+        Column('source', Text, nullable=False),
+        Column('updated_at', DateTime(timezone=True), nullable=False),
+        Column('presentation', JSONB, nullable=False),
+    )
+
+    catalogue_covers = Table(
+        'catalogue_covers',
+        metadata,
+        Column('candidate_id', Text, primary_key=True),
+        Column('source', Text, nullable=False),
+        Column('attached_at', DateTime(timezone=True), nullable=False),
+        Column('cover', JSONB, nullable=False),
+    )
+
     entitlements = Table(
         'entitlements',
         metadata,

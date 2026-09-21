@@ -1,26 +1,27 @@
-"""The Proofbasket storefront: the goods the publication gate approved.
+"""The commerce HTTP surface: catalogue, checkout, account and webhooks.
 
-This module renders; it does not decide. It is handed a ``StorefrontCatalog``,
-whose only query is over the gate's own ``publishable`` column, so there is no
-code path here that could list a good the gate refused. Every value that came
-from a third party - a title, a creator, a URL - is escaped on the way into the
-markup, because those strings are written by strangers.
+The surface is JSON only. No handler here renders markup and no response body
+carries a candidate's origin: a buyer sees a preview served from our own host,
+never the URL a good was found at. The publication gate already decided what may
+be listed before any of this ran; this module is transport, not the decision.
 """
 
 from __future__ import annotations
 
 import hmac
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from contextlib import AbstractAsyncContextManager
 from datetime import UTC, datetime
 from decimal import Decimal
-from html import escape
+from typing import Annotated
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse, JSONResponse, Response
+from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel, SecretStr
 
+from packages.core.src.errors import VelmorError
+from packages.services.src.commerce.catalogue_service import StorefrontCatalogue
 from packages.services.src.commerce.checkout import CheckoutService
 from packages.services.src.commerce.delivery import DeliveryService
 from packages.services.src.commerce.disclosure import SellerDisclosureCheck
@@ -28,15 +29,18 @@ from packages.services.src.commerce.errors import (
     CheckoutRefusedError,
     DeliveryRefusedError,
     GrantRefusedError,
+    PreviewCoverMissingError,
+    PreviewDigestMismatchError,
+    PreviewNotFoundError,
+    PreviewOriginUnreachableError,
 )
 from packages.services.src.commerce.grants import DeliveryGrantService
-from packages.services.src.domain.candidate import Candidate
+from packages.services.src.commerce.preview import GoodPreview
 from packages.services.src.domain.cart import Cart, CartLine
-from packages.services.src.domain.catalogue import CatalogueEntry, CatalogueEntryState
-from packages.services.src.domain.category import Category
+from packages.services.src.domain.catalogue_card import CatalogueCard, CategorySummary
+from packages.services.src.domain.catalogue_query import CatalogueSort
 from packages.services.src.domain.entitlement import Entitlement, EntitlementState
-from packages.services.src.domain.license import StorefrontListing
-from packages.services.src.domain.rights import RightsRecord
+from packages.services.src.domain.presentation import DEFAULT_LOCALE, Locale
 from packages.services.src.domain.seller import SellerDisclosure
 from packages.services.src.payments.bepaid_provider import BePaidProvider
 from packages.services.src.payments.errors import (
@@ -46,183 +50,12 @@ from packages.services.src.payments.errors import (
 from packages.services.src.payments.stripe_provider import StripeProvider
 from packages.services.src.payments.stub_provider import StubPaymentProvider
 from packages.services.src.persistence.contract import (
-    CandidateRepository,
-    CatalogueEntryRepository,
-    CategoryRepository,
     EntitlementRepository,
     OrderRepository,
     SellerDisclosureRepository,
-    StorefrontCatalog,
 )
 
-Good = tuple[Candidate, RightsRecord]
 Lifespan = Callable[[FastAPI], AbstractAsyncContextManager[None]]
-
-
-class StorefrontPage:
-    """The catalogue page: one card per published good."""
-
-    TITLE = 'Proofbasket'
-    SUBTITLE = 'Goods that passed the Velmor rights gate.'
-    EMPTY = (
-        'Nothing has passed the gate yet. Run discovery, then verification, and the '
-        'goods that are provably sellable appear here.'
-    )
-    NOTICE = (
-        'Read-only catalogue. Payment and checkout are not implemented: this page '
-        'records what may be sold, it does not sell it.'
-    )
-    UNKNOWN_CREATOR = 'Unknown creator'
-    NO_LICENCE = 'no licence'
-
-    STYLE = """
-:root { color-scheme: light dark; }
-* { box-sizing: border-box; }
-body {
-  margin: 0;
-  font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
-  line-height: 1.55;
-  color: #14161a;
-  background: #f6f7f9;
-}
-header {
-  padding: 2.5rem 1.5rem 1.75rem;
-  background: #14161a;
-  color: #ffffff;
-}
-header h1 { margin: 0 0 .35rem; font-size: 1.9rem; letter-spacing: -.02em; }
-header p { margin: 0; color: #b9bfc9; }
-.count { margin-top: .85rem !important; color: #ffffff !important; font-weight: 600; }
-main {
-  display: grid;
-  gap: 1.25rem;
-  grid-template-columns: repeat(auto-fill, minmax(17rem, 1fr));
-  padding: 2rem 1.5rem 3rem;
-  max-width: 74rem;
-  margin: 0 auto;
-}
-.card {
-  background: #ffffff;
-  border: 1px solid #e2e5ea;
-  border-radius: .6rem;
-  padding: 1.15rem 1.25rem 1.25rem;
-  display: flex;
-  flex-direction: column;
-}
-.card h2 { margin: 0 0 .3rem; font-size: 1.05rem; line-height: 1.35; }
-.creator { margin: 0 0 .8rem; color: #626a76; font-size: .9rem; }
-.badges { margin: 0 0 .9rem; display: flex; flex-wrap: wrap; gap: .4rem; }
-.badge {
-  display: inline-block;
-  padding: .2rem .55rem;
-  border-radius: 999px;
-  background: #eef1f5;
-  color: #2a3038;
-  font-size: .78rem;
-  font-weight: 600;
-}
-.verdict { background: #e3f3e8; color: #1d6b37; }
-.obligations { margin-top: auto; }
-.obligations h3 {
-  margin: 0 0 .35rem;
-  font-size: .74rem;
-  text-transform: uppercase;
-  letter-spacing: .07em;
-  color: #767d89;
-}
-.obligations ul { margin: 0; padding-left: 1.1rem; font-size: .87rem; }
-.obligations p { margin: 0; font-size: .87rem; color: #626a76; }
-.links { margin: 1rem 0 0; font-size: .87rem; }
-.links a { color: #1a5fb4; }
-.empty {
-  grid-column: 1 / -1;
-  background: #ffffff;
-  border: 1px dashed #c8cdd5;
-  border-radius: .6rem;
-  padding: 2rem 1.5rem;
-  color: #626a76;
-}
-footer {
-  padding: 1.25rem 1.5rem 2.5rem;
-  color: #767d89;
-  font-size: .84rem;
-  text-align: center;
-}
-"""
-
-    def render(self, goods: tuple[Good, ...], total: int) -> str:
-        if goods:
-            body = '\n'.join(self._card(candidate, record) for candidate, record in goods)
-        else:
-            body = f'<p class="empty">{escape(self.EMPTY)}</p>'
-        return self._document(body, shown=len(goods), total=total)
-
-    def _document(self, body: str, shown: int, total: int) -> str:
-        return (
-            '<!DOCTYPE html>'
-            '<html lang="en">'
-            '<head>'
-            '<meta charset="utf-8">'
-            '<meta name="viewport" content="width=device-width, initial-scale=1">'
-            f'<title>{escape(self.TITLE)}</title>'
-            f'<style>{self.STYLE}</style>'
-            '</head>'
-            '<body>'
-            '<header>'
-            f'<h1>{escape(self.TITLE)}</h1>'
-            f'<p>{escape(self.SUBTITLE)}</p>'
-            f'<p class="count">{self._count(shown, total)}</p>'
-            '</header>'
-            f'<main>{body}</main>'
-            f'<footer>{escape(self.NOTICE)}</footer>'
-            '</body>'
-            '</html>'
-        )
-
-    def _count(self, shown: int, total: int) -> str:
-        if shown == total:
-            return escape(f'{total} approved for sale')
-        return escape(f'{total} approved for sale, showing the {shown} most recent')
-
-    def _card(self, candidate: Candidate, record: RightsRecord) -> str:
-        return (
-            '<article class="card">'
-            f'<h2>{escape(candidate.title)}</h2>'
-            f'<p class="creator">{self._creator(candidate)}</p>'
-            f'<p class="badges">{self._badges(record)}</p>'
-            f'{self._obligations(record)}'
-            f'<p class="links">{self._links(candidate)}</p>'
-            '</article>'
-        )
-
-    def _creator(self, candidate: Candidate) -> str:
-        if candidate.creator is None:
-            return escape(self.UNKNOWN_CREATOR)
-        return escape(candidate.creator)
-
-    def _badges(self, record: RightsRecord) -> str:
-        licence = record.license_id or self.NO_LICENCE
-        return (
-            f'<span class="badge">{escape(licence)}</span>'
-            f'<span class="badge verdict">{escape(record.verdict.value)}</span>'
-        )
-
-    def _obligations(self, record: RightsRecord) -> str:
-        if record.obligations:
-            items = ''.join(f'<li>{escape(item)}</li>' for item in record.obligations)
-            content = f'<ul>{items}</ul>'
-        else:
-            content = '<p>None</p>'
-        return f'<div class="obligations"><h3>Obligations</h3>{content}</div>'
-
-    def _links(self, candidate: Candidate) -> str:
-        source = f'<a href="{escape(candidate.landing_url, quote=True)}">Source page</a>'
-        if candidate.download_url is None:
-            return source
-        download = (
-            f'<a href="{escape(candidate.download_url, quote=True)}">Download</a>'
-        )
-        return f'{source} &middot; {download}'
 
 
 class CheckoutLineBody(BaseModel):
@@ -256,17 +89,17 @@ class ApiApplication:
     """The HTTP surface of the platform.
 
     Routes are registered as bound methods rather than decorated module-level
-    functions, so the handlers can read the injected catalogue without a global.
+    functions, so the handlers can read the injected services without a global.
     """
 
-    CATALOGUE_LIMIT = 100
-    BROWSE_LIMIT = 200
+    SERVICE_NAME = 'velmor-api'
     BUYER_HEADER = 'x-buyer-id'
     OPERATOR_HEADER = 'x-operator-key'
     STRIPE_SIGNATURE_HEADER = 'stripe-signature'
     BEPAID_SIGNATURE_HEADER = 'content-signature'
     STUB_SIGNATURE_HEADER = 'x-stub-signature'
     AUTHORIZATION_HEADER = 'authorization'
+    PREVIEW_CACHE_CONTROL = 'public, max-age=31536000, immutable'
     CORS_ALLOW_METHODS = ('GET', 'POST', 'OPTIONS')
     CORS_ALLOW_HEADERS = (
         'X-Buyer-Id',
@@ -279,11 +112,28 @@ class ApiApplication:
         'http://127.0.0.1:3000',
     )
     BASE_PROVIDER_IDS = ('stripe', 'bepaid')
+    #: The documented preview refusals and the status each maps to (contract.md,
+    #: GET /catalogue/goods/{candidate_id}/preview). A cover whose bytes are gone
+    #: is 500: we wrote that row and the bytes went missing from our own cache, so
+    #: the fault is our inconsistent state and not an upstream one, and 502 would
+    #: send an operator to inspect an origin that is fine. It stays registered
+    #: rather than falling through to the default handler so the body is fixed and
+    #: names no origin. Re-running "velmor cover" repairs it.
+    PREVIEW_REFUSALS: dict[type[VelmorError], tuple[int, str]] = {
+        PreviewNotFoundError: (404, 'no preview exists for this good'),
+        PreviewDigestMismatchError: (
+            409,
+            'the file no longer matches the recorded digest',
+        ),
+        PreviewOriginUnreachableError: (502, 'the preview could not be produced'),
+        PreviewCoverMissingError: (500, 'the preview could not be produced'),
+    }
 
     def __init__(
         self,
         environment: str,
-        catalog: StorefrontCatalog,
+        catalogue: StorefrontCatalogue,
+        preview: GoodPreview,
         grants: DeliveryGrantService,
         delivery: DeliveryService,
         entitlements: EntitlementRepository,
@@ -294,17 +144,13 @@ class ApiApplication:
         bepaid: BePaidProvider,
         orders: OrderRepository,
         operator_refund_key: SecretStr,
-        entries: CatalogueEntryRepository,
-        categories: CategoryRepository,
-        candidates: CandidateRepository,
-        catalogue_unit_amount: Decimal,
-        catalogue_currency: str,
         storefront_domain: str,
         stub: StubPaymentProvider | None = None,
         lifespan: Lifespan | None = None,
     ) -> None:
         self._environment = environment
-        self._catalog = catalog
+        self._catalogue = catalogue
+        self._preview = preview
         self._grants = grants
         self._delivery = delivery
         self._entitlements = entitlements
@@ -317,18 +163,12 @@ class ApiApplication:
         self._stub = stub
         self._orders = orders
         self._operator_refund_key = operator_refund_key
-        self._entries = entries
-        self._categories = categories
-        self._candidates = candidates
-        self._catalogue_unit_amount = catalogue_unit_amount
-        self._catalogue_currency = catalogue_currency
         self._storefront_domain = storefront_domain
         self._lifespan = lifespan
-        self._page = StorefrontPage()
 
     def build(self) -> FastAPI:
         app = FastAPI(
-            title=StorefrontPage.TITLE,
+            title=self.SERVICE_NAME,
             docs_url=None,
             redoc_url=None,
             openapi_url=None,
@@ -342,9 +182,9 @@ class ApiApplication:
             allow_headers=list(self.CORS_ALLOW_HEADERS),
         )
         app.add_api_route('/health', self._health, methods=['GET'])
-        app.add_api_route(
-            '/', self._storefront, methods=['GET'], response_class=HTMLResponse
-        )
+        for preview_error, refusal in self.PREVIEW_REFUSALS.items():
+            app.add_exception_handler(preview_error, self._refusal_handler(*refusal))
+        app.add_api_route('/', self._root, methods=['GET'])
         app.add_api_route(
             '/catalogue/categories', self._list_categories, methods=['GET']
         )
@@ -354,6 +194,11 @@ class ApiApplication:
         app.add_api_route('/catalogue/goods', self._list_goods, methods=['GET'])
         app.add_api_route(
             '/catalogue/goods/{candidate_id}', self._get_good, methods=['GET']
+        )
+        app.add_api_route(
+            '/catalogue/goods/{candidate_id}/preview',
+            self._get_good_preview,
+            methods=['GET'],
         )
         app.add_api_route(
             '/account/goods/{candidate_id}/grant',
@@ -399,85 +244,142 @@ class ApiApplication:
     async def _health(self) -> dict[str, str]:
         return {'status': 'ok', 'environment': self._environment}
 
-    async def _storefront(self) -> HTMLResponse:
-        goods = await self._catalog.published(self.CATALOGUE_LIMIT)
-        total = await self._catalog.published_count()
-        return HTMLResponse(self._page.render(goods, total))
+    async def _root(self) -> JSONResponse:
+        """Name the service so an operator has a discovery point.
 
-    async def _list_categories(self) -> JSONResponse:
-        categories = await self._categories.all()
-        return JSONResponse(
-            [self._category_summary(category) for category in categories]
-        )
+        It carries no good, no count and no URL: the catalogue is a JSON route a
+        buyer's storefront reads, and the root must not become a second, ungated
+        listing of it.
+        """
+        return JSONResponse({'service': self.SERVICE_NAME, 'status': 'ok'})
 
-    async def _get_category(self, slug: str) -> JSONResponse:
-        category = await self._categories.by_slug(slug)
-        if category is None:
+    async def _list_categories(
+        self, locale: Annotated[Locale, Query()] = DEFAULT_LOCALE
+    ) -> JSONResponse:
+        summaries = await self._catalogue.category_summaries(locale)
+        return JSONResponse([self._category_payload(summary) for summary in summaries])
+
+    async def _get_category(
+        self,
+        slug: str,
+        locale: Annotated[Locale, Query()] = DEFAULT_LOCALE,
+        limit: Annotated[int, Query(ge=1, le=60)] = 24,
+        offset: Annotated[int, Query(ge=0)] = 0,
+    ) -> JSONResponse:
+        page = await self._catalogue.category_page(slug, locale, limit, offset)
+        if page is None:
             return JSONResponse({'detail': 'category not found'}, status_code=404)
-        entries = await self._entries.by_category(category.category_id)
-        goods = [
-            await self._product_dto(entry)
-            for entry in entries
-            if self._is_saleable(entry)
-        ]
+        payload = self._category_payload(page.summary)
+        payload['items'] = [self._card_payload(card) for card in page.items]
+        payload['total'] = page.total
+        return JSONResponse(payload)
+
+    async def _list_goods(
+        self,
+        locale: Annotated[Locale, Query()] = DEFAULT_LOCALE,
+        q: Annotated[str | None, Query()] = None,
+        sort: Annotated[CatalogueSort, Query()] = CatalogueSort.NEWEST,
+        category: Annotated[str | None, Query()] = None,
+        license: Annotated[str | None, Query()] = None,
+        limit: Annotated[int, Query(ge=1, le=60)] = 24,
+        offset: Annotated[int, Query(ge=0)] = 0,
+    ) -> JSONResponse:
+        """The catalogue page a buyer asked for.
+
+        ``sort`` is validated as an enum and ``limit`` and ``offset`` by their
+        bounds, so an out-of-contract query is a 422 at the edge rather than a
+        silent fallback to a default the buyer did not choose.
+        """
+        page = await self._catalogue.page(
+            locale, sort, q, category, license, limit, offset
+        )
         return JSONResponse(
             {
-                **self._category_summary(category),
-                'goods': goods,
+                'items': [self._card_payload(card) for card in page.items],
+                'total': page.total,
+                'limit': page.limit,
+                'offset': page.offset,
             }
         )
 
-    async def _list_goods(self) -> JSONResponse:
-        entries = await self._entries.entries(self.BROWSE_LIMIT)
-        goods = [
-            await self._product_dto(entry)
-            for entry in entries
-            if self._is_saleable(entry)
-        ]
-        return JSONResponse(goods)
-
-    async def _get_good(self, candidate_id: str) -> JSONResponse:
-        entry = await self._entries.by_candidate(candidate_id)
-        if entry is None or not self._is_saleable(entry):
+    async def _get_good(
+        self, candidate_id: str, locale: Annotated[Locale, Query()] = DEFAULT_LOCALE
+    ) -> JSONResponse:
+        card = await self._catalogue.card(candidate_id, locale)
+        if card is None:
             return JSONResponse({'detail': 'good not found'}, status_code=404)
-        return JSONResponse(await self._product_dto(entry))
+        return JSONResponse(self._card_payload(card))
 
-    @staticmethod
-    def _is_saleable(entry: CatalogueEntry) -> bool:
-        return (
-            entry.state is CatalogueEntryState.PUBLISHED
-            and entry.listing is StorefrontListing.PAID_OK
+    async def _get_good_preview(self, candidate_id: str) -> Response:
+        """Serve the bytes a product card or page shows for a good.
+
+        A refusal is not handled here. ``GoodPreview.render`` reports one of four
+        documented errors (contract.md, GET /catalogue/goods/{candidate_id}/preview)
+        and ``PREVIEW_REFUSALS`` maps each to the status code that file fixes,
+        registered as an exception handler in ``build``. Writing the mapping as a
+        table rather than as a chain of ``except`` clauses means the route has no
+        catch in it at all, and an error that reaches the default handler is a
+        programming mistake rather than a buyer-visible state.
+        """
+        image = await self._preview.render(candidate_id)
+        return Response(
+            content=image.payload,
+            media_type=image.media_type,
+            headers={
+                'ETag': image.etag,
+                'Cache-Control': self.PREVIEW_CACHE_CONTROL,
+            },
         )
 
     @staticmethod
-    def _category_summary(category: Category) -> dict[str, str]:
+    def _refusal_handler(
+        status: int, detail: str
+    ) -> Callable[[Request, Exception], Awaitable[JSONResponse]]:
+        """Build the handler for one documented preview refusal.
+
+        The detail is closed over rather than looked up from ``PREVIEW_REFUSALS``
+        at request time, so the body a caller sees is fixed when the table is
+        read: a refusal this table does not name has no handler and stays a 500,
+        which is the honest signal that the contract and the code disagree.
+        Every detail is one of ours and names no origin, which is the part of the
+        contract that matters most: a preview is the first time origin bytes
+        leave this host before payment, and where they came from is not the
+        buyer's business.
+        """
+
+        async def handler(_request: Request, _error: Exception) -> JSONResponse:
+            return JSONResponse({'detail': detail}, status_code=status)
+
+        return handler
+
+    @staticmethod
+    def _card_payload(card: CatalogueCard) -> dict[str, object]:
         return {
-            'category_id': category.category_id,
-            'name': category.name,
-            'slug': category.slug,
+            'candidate_id': card.candidate_id,
+            'title': card.title,
+            'original_title': card.original_title,
+            'summary': card.summary,
+            'creator': card.creator,
+            'license_id': card.license_id,
+            'obligations': list(card.obligations),
+            'category_id': card.category_id,
+            'category_slug': card.category_slug,
+            'unit_amount': card.unit_amount,
+            'currency': card.currency,
+            'preview_url': card.preview_url,
+            'preview_is_cover': card.preview_is_cover,
+            'content_type': card.content_type,
+            'size_bytes': card.size_bytes,
+            'published_at': ApiApplication._format_instant(card.published_at),
         }
 
-    async def _product_dto(self, entry: CatalogueEntry) -> dict[str, object]:
-        candidate = await self._candidates.by_candidate_id(entry.candidate_id)
-        if candidate is None:
-            raise RuntimeError(
-                f'catalogue entry {entry.candidate_id} has no candidate row'
-            )
-        category_slug: str | None = None
-        if entry.category_id is not None:
-            category = await self._categories.by_id(entry.category_id)
-            if category is not None:
-                category_slug = category.slug
+    @staticmethod
+    def _category_payload(summary: CategorySummary) -> dict[str, object]:
         return {
-            'candidate_id': entry.candidate_id,
-            'title': candidate.title,
-            'creator': candidate.creator,
-            'license_id': entry.license_id,
-            'obligations': list(entry.obligations),
-            'category_id': entry.category_id,
-            'category_slug': category_slug,
-            'unit_amount': format(self._catalogue_unit_amount, 'f'),
-            'currency': self._catalogue_currency,
+            'category_id': summary.category_id,
+            'name': summary.name,
+            'slug': summary.slug,
+            'count': summary.count,
         }
 
     async def _issue_grant(self, candidate_id: str, request: Request) -> JSONResponse:

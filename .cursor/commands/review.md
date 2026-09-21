@@ -44,6 +44,14 @@ done.
    - The import direction in `.cursor/rules/02-architecture-layers.mdc`.
    - The domain vocabulary in `packages/services/src/domain/` — no synonyms.
 
+   When the diff touches `storefront/**` or a buyer-facing route under
+   `packages/api/**`, also read `.cursor/rules/07-product-surface.mdc` and
+   `.cursor/skills/storefront-ux/SKILL.md`, and note the contracts they fix:
+   - No buyer-visible string outside the locale dictionaries; no hardcoded locale.
+   - A visual good is shown with a preview; a good with no image has a placeholder.
+   - The origin location is never disclosed on a buyer-facing response.
+   - Every state a buyer can reach is designed and localised.
+
 3. **Run lightweight verification as evidence**
 
    Do not claim a check passed without its output:
@@ -51,8 +59,11 @@ done.
    - Runtime sanity → `uv run python -m compileall -q packages velmor`
    - Rights, screening, connectors or the gate changed → also run `/rights-verify`
    - Spec or planning changed → `openspec validate --strict "<change-name>"`
+   - Buyer surface changed → `npm --prefix storefront run lint` (dictionary
+     parity) and `npm --prefix storefront run build`, then `/ux-verify`
 
-   Report each result as pass/fail with the key line.
+   Report each result as pass/fail with the key line. `/ux-verify` is the only
+   check here that looks at a rendered page; the others cannot see one.
 
 4. **Dispatch the reviewer subagents (in parallel, one message)**
 
@@ -70,7 +81,12 @@ done.
      the path from evidence to RightsVerdict; can an unresolved licence reach
      PUBLISHABLE; does every non-publishable GateDecision carry at least one reason;
      has any import broken the allowed layer direction; is any node non-idempotent
-     under a checkpoint resume. Flag spec drift and broken contracts with file paths
+     under a checkpoint resume. If the diff touches storefront/ or a buyer-facing
+     route under packages/api/, also apply .cursor/rules/07-product-surface.mdc:
+     a buyer-visible string outside the locale dictionaries, a hardcoded locale, a
+     good rendered without a preview and without a placeholder, an undisclosed
+     origin on a buyer-facing response, a hover-only action, or a page with no
+     empty/loading/error state. Flag spec drift and broken contracts with file paths
      and line numbers, not style.
      ```
    - **security-review** — description exactly `Security Review`, prompt:
@@ -120,6 +136,7 @@ done.
 - ruff: <pass/fail + line>
 - pytest: <pass/fail + line>
 - rights-verify: <pass/fail + line or n/a>
+- ux-verify: <pass/fail + line or n/a>
 - openspec validate: <pass/fail + line>
 
 ### Findings
@@ -138,3 +155,6 @@ PASS / CHANGES REQUIRED
 - Keep the diff scope explicit; the reviewers must know what is in and out.
 - A claim that the gate has stopped refusing is verified with a test input, never
   with reasoning about the diff.
+- When the diff touches a buyer-facing surface, `/ux-verify` is required, and its
+  screenshots are the evidence. Do not issue PASS on a buyer surface that was only
+  read, only tested, or only reviewed as a diff.

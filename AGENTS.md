@@ -25,6 +25,29 @@ without `GateDecision.PUBLISHABLE`. If a change makes it possible to reason abou
 publishing with something non-deterministic, the change is wrong. See
 `.cursor/rules/06-rights-engine.mdc`.
 
+## The second thing to internalise
+
+A surface that works is not a surface that sells.
+
+The commerce layer was once complete and correct while the entire buyer surface was
+a list of source filenames with a price beside each one, in one hardcoded language,
+with no product image, no category and no search. Every test passed and every review
+passed. There was no shop, and nothing in the harness could see it: a diff cannot
+show that a page has no images, and a green suite says nothing about a rendered page.
+
+So, for anything a buyer reads or acts on:
+
+- it is specified by **what the buyer sees**, not only by what the system does;
+- its copy comes from the locale dictionaries, never from a literal in a component,
+  and the language is never chosen for the buyer;
+- a visual product is shown as an image, and a good with no image gets a real
+  placeholder rather than a broken tile or a line of text;
+- it is verified by **looking at it**, and the evidence is a screenshot.
+
+`.cursor/rules/07-product-surface.mdc` is canonical. `.cursor/skills/storefront-ux/SKILL.md`
+is the map and the layout rules with their sources. `/ux-verify` is the gate, the
+buyer-surface counterpart of `/rights-verify`.
+
 ## Repository layout
 
 ```
@@ -217,9 +240,12 @@ Implemented and tested:
   escalation of a low-confidence reading), graph assembly, runner.
 - `velmor`: CLI, container, agent adapters, the console pass report; also
   `velmor serve`, `velmor publish`, `velmor seed-disclosure`.
-- `storefront/`: Next.js Proofbasket UI (browse, cart, account, checkout;
-  Belarusian copy). Presentation only — no rights logic, no payment secrets,
-  no privileged Saleor credentials.
+- `storefront/`: Next.js Proofbasket UI (browse, cart, account, checkout).
+  Presentation only — no rights logic, no payment secrets, no privileged Saleor
+  credentials. Its buyer surface is being rebuilt by the `redesign-storefront-ux`
+  change (locale routing, product cards with previews, search and filters); until
+  that lands, the surface is the one described in `.cursor/skills/storefront-ux/SKILL.md`
+  under "Anti-patterns seen in this repository", not a reference.
 - Demo deploy: Saleor on the host; shop at
   `https://shop.78-111-89-46.sslip.io/` (current demo host, not a product domain).
 - The vertical slice is walkable end to end: Openverse discovery -> screening ->
@@ -286,6 +312,7 @@ Project-authored skills live in `.cursor/skills/`:
 | `rights-engine` | the verdict path, the policy table, the invariants |
 | `source-connector` | adding a source: spec, tier, credentials, connector, tests |
 | `agent-graph` | LangGraph structure, nodes, state, interrupts, the LLM boundary |
+| `storefront-ux` | locale routing, copy dictionaries, design tokens, shared components, the layout rules per page with their sources, the visual checklist |
 
 Reinstall or update:
 
@@ -328,15 +355,18 @@ node scripts/setup-mcp.mjs
 | `04-python.mdc` | Python style, models, parameters, logging, comments |
 | `05-agent-graphs.mdc` | framework choice, LangGraph state/nodes/edges/interrupts |
 | `06-rights-engine.mdc` | deny by default, evidence, the gate, policy changes |
+| `07-product-surface.mdc` | the buyer surface: specification, localisation, imagery, layout, visual verification |
 
 ### Hooks (`.cursor/hooks.json`)
 
 | Hook | Event | Effect |
 |------|-------|--------|
 | `secret-guard.cjs` | preToolUse on writes | denies a write containing a hardcoded credential (`.env` exempt) |
+| `ui-guard.cjs` | preToolUse on writes | denies a storefront edit that hardcodes a buyer-visible string or a language |
 | `policy-guard.cjs` | preToolUse on writes | requires human approval for rights policy files and for harness files |
 | `destructive-guard.cjs` | beforeShellExecution | denies force-push to main/master, `reset --hard`, `clean -fd`, `docker ... -v`, `dropdb`, recursive force deletes |
 | `lint-feedback.cjs` | postToolUse on writes | runs `ruff check` on the edited file and returns violations as context |
+| `ui-feedback.cjs` | postToolUse on writes | runs the locale dictionary parity check and returns missing keys as context |
 
 Hooks are enforcement, not suggestions. Do not work around a hook; if a blocked
 operation is genuinely required, ask the user to run it.
@@ -345,9 +375,10 @@ operation is genuinely required, ask the user to run it.
 
 | Command | Purpose |
 |---------|---------|
-| `/ship <task>` | autonomous orchestrator: propose -> implement (fresh implementer subagent per task, task review, bounded fix loop) -> verify (evidence) -> `/rights-verify` -> `/review` -> finish -> archive. Stops for the human only at plan approval and integration. |
+| `/ship <task>` | autonomous orchestrator: propose -> implement (fresh implementer subagent per task, task review, bounded fix loop) -> verify (evidence) -> `/rights-verify` -> `/ux-verify` -> `/review` -> finish -> archive. Stops for the human only at plan approval and integration. |
 | `/review` | dispatches `bugbot` + `security-review` as the merge gate; reports PASS / CHANGES REQUIRED |
 | `/rights-verify` | domain runtime verifier: proves the publication gate still refuses what it must |
+| `/ux-verify` | buyer-surface runtime verifier: drives the running shop and proves a buyer can see, understand and buy, in every locale |
 | `/opsx-*` | OpenSpec: explore, propose, apply, sync, update, archive |
 
 ### Writer/reviewer roles - invoke, do not reimplement
@@ -358,7 +389,8 @@ operation is genuinely required, ask the user to run it.
 | Task checker | task reviewer subagent (`task-reviewer-prompt.md`) |
 | Final checker | `bugbot` + `security-review` subagents |
 | Domain runtime checker | `/rights-verify` |
-| Policy enforcer | hooks `secret-guard` / `policy-guard` / `destructive-guard` (automatic) |
+| Buyer-surface runtime checker | `/ux-verify` |
+| Policy enforcer | hooks `secret-guard` / `ui-guard` / `policy-guard` / `destructive-guard` (automatic) |
 | Contract | OpenSpec specs + `/opsx-*` |
 | Evidence | `verification-before-completion` |
 | Integration | `finishing-a-development-branch` |
@@ -377,14 +409,22 @@ Before claiming work is done, run and quote the output of:
 uv run ruff check
 uv run python -m pytest packages -q
 uv run python -m compileall -q packages velmor
+npm --prefix storefront run lint          # includes the locale dictionary parity check
+npm --prefix storefront run build
 openspec validate --strict "<change>"     # when specs or planning changed
 ```
 
 And for anything touching rights, screening, connectors or the gate: `/rights-verify`.
-For the final gate before merge: `/review`.
+For anything touching a buyer-facing surface: `/ux-verify` — the screenshots are the
+evidence, and a green suite is not. For the final gate before merge: `/review`.
 
 Never claim a check passed without its output. Never describe what should happen as
 though it did. If something is unverified, say it is unverified.
+
+For a buyer-facing surface, "unverified" includes "I read the code and it looks
+right" and "the test asserts the HTML contains the title". The only evidence that a
+buyer can use the shop is a screenshot of it at desktop and mobile width in every
+locale.
 
 ## Working rules for agents
 
@@ -403,3 +443,11 @@ though it did. If something is unverified, say it is unverified.
   them.
 - When a task turns out to need the rights rules to bend to pass, stop. That is a
   signal the design is wrong, not that the rule is negotiable.
+- When a task touches anything a buyer reads or acts on, read
+  `.cursor/rules/07-product-surface.mdc` and `.cursor/skills/storefront-ux/SKILL.md`
+  before designing it, put every string in the locale dictionaries, and verify the
+  result with `/ux-verify`. Do not invent a layout: the skill records the patterns
+  and their sources, and a pattern it does not cover gets researched and cited.
+- When a spec for a buyer-facing capability states only behaviour, treat that as a
+  gap in the spec and fix the spec before implementing. A requirement satisfied by
+  a text dump is how the shop once shipped as a list of filenames.

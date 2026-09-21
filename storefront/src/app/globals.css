@@ -1,50 +1,131 @@
-:root {
-  --pb-slate-950: #0f1419;
-  --pb-slate-900: #1a222c;
-  --pb-slate-700: #3d4a5c;
-  --pb-slate-500: #6b7a8f;
-  --pb-slate-300: #a8b3c2;
-  --pb-slate-200: #d5dbe3;
-  --pb-slate-100: #e8ecf1;
-  --pb-slate-50: #f0f3f6;
-  --pb-teal-800: #1f5554;
-  --pb-teal-600: #3a8583;
-  --pb-teal-100: #d4e8e7;
-  --background: var(--pb-slate-50);
-  --foreground: var(--pb-slate-950);
-  --accent: var(--pb-teal-600);
-  --accent-strong: var(--pb-teal-800);
-  --danger: #8a3a3a;
+@import "tailwindcss";
+
+/*
+ * Design tokens for the print-room identity.
+ *
+ * Every value here is frozen against a measured WCAG contrast ratio; the ratios and the
+ * method are recorded in `.superpowers/sdd/rebrand/identity.md`. Two of them exist to
+ * correct defects rather than to change the mood:
+ *
+ *   - `--color-muted` measures 5.37:1 on paper, where the previous secondary text
+ *     (`slate-500` on `slate-50`) measured about 4.0:1 and failed AA for normal text.
+ *   - `--color-line-strong` exists because a form control's boundary needs 3:1 under
+ *     WCAG 1.4.11, and the previous hairline measured 1.28:1. `--color-line` stays for
+ *     decorative dividers, where a subtle value is correct.
+ *
+ * A component writes a semantic name, never a hex value.
+ */
+@theme {
+  /* Paper: the warm ground the shop sits on. Deliberately not white. */
+  --color-paper: #faf6ee;
+  --color-surface: #fffdf8;
+  --color-surface-muted: #f5efe3;
+  --color-surface-sunken: #f1eadd;
+  --color-surface-inverse: #1c1815;
+
+  /* Ink: warm near-black, never blue-black. */
+  --color-ink: #1c1815;
+  --color-muted: #6e6459;
+  --color-ink-inverse: #f5f0e6;
+  --color-muted-inverse: #b5aa9c;
+
+  /* Seal: the single accent. The hallmark, the primary action, the focus ring. */
+  --color-accent: #b04a2f;
+  --color-accent-strong: #8c3a23;
+  --color-accent-soft: #f7e6de;
+
+  /* Lines: decorative dividers, then control boundaries that must meet 3:1. */
+  --color-line: #e3dbcb;
+  --color-line-strong: #8e8271;
+
+  --color-danger: #9c3325;
+
+  /* Spacing rhythm: one 4 px step, plus named gutters for page shells. */
+  --spacing: 0.25rem;
+  --spacing-gutter: 1rem;
+  --spacing-gutter-lg: 1.5rem;
+  --spacing-section: 3rem;
+  --spacing-section-lg: 4.5rem;
+
+  /* Radii. Print plates have square corners; the radius is for controls, not for imagery. */
+  --radius-sm: 0.125rem;
+  --radius-md: 0.25rem;
+  --radius-lg: 0.5rem;
+  --radius-pill: 9999px;
+
+  /* Two families: the next/font variables keep their names in the root layout. */
+  --font-sans: var(--font-body), "Segoe UI", sans-serif;
+  --font-heading: var(--font-display), Georgia, serif;
+
+  /* Shadow steps, warmed to the ink so they do not read as blue-grey. */
+  --shadow-sm: 0 1px 2px rgba(28, 24, 21, 0.06);
+  --shadow-md: 0 6px 16px -8px rgba(28, 24, 21, 0.18);
+  --shadow-lg: 0 20px 40px -24px rgba(28, 24, 21, 0.28);
+
+  /* Motion. */
+  --ease-standard: cubic-bezier(0.2, 0, 0, 1);
+  --duration-fast: 120ms;
+  --duration-base: 200ms;
 }
 
-html {
-  height: 100%;
+@layer base {
+  html {
+    height: 100%;
+    -webkit-text-size-adjust: 100%;
+  }
+
+  html,
+  body {
+    max-width: 100vw;
+    overflow-x: hidden;
+  }
+
+  body {
+    min-height: 100%;
+    background: var(--color-paper);
+    color: var(--color-ink);
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  * {
+    box-sizing: border-box;
+  }
+
+  h1,
+  h2,
+  h3,
+  h4 {
+    font-family: var(--font-heading);
+    font-weight: 600;
+    letter-spacing: -0.01em;
+  }
+
+  a {
+    color: inherit;
+    text-decoration: none;
+  }
+
+  /* A focus ring that is never removed: keyboard users must always see it. Verified at
+   * 6.40:1 or better against every surface in the token set. */
+  :focus-visible {
+    outline: 2px solid var(--color-accent-strong);
+    outline-offset: 2px;
+  }
+
+  ::selection {
+    background: var(--color-accent-soft);
+    color: var(--color-ink);
+  }
 }
 
-html,
-body {
-  max-width: 100vw;
-  overflow-x: hidden;
-}
-
-body {
-  min-height: 100%;
-  color: var(--foreground);
-  background: var(--background);
-  font-family: var(--font-body), "Segoe UI", sans-serif;
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
-}
-
-* {
-  box-sizing: border-box;
-  padding: 0;
-  margin: 0;
-}
-
-a {
-  color: inherit;
-  text-decoration: none;
+@layer utilities {
+  /* Minimum 44x44 px target for anything interactive. */
+  .tap-target {
+    min-height: 2.75rem;
+    min-width: 2.75rem;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -54,5 +135,6 @@ a {
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
   }
 }

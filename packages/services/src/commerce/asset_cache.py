@@ -34,5 +34,14 @@ class AssetCache:
     def has(self, digest: str) -> bool:
         return self._path_for(digest).is_file()
 
+    def scoped(self, name: str) -> AssetCache:
+        """A cache over ``<root>/<name>``, sharing this cache's size budget.
+
+        Used for a derivative that must not be confusable with an origin file
+        of the same digest, while still living under the one delivery cache the
+        process is configured with.
+        """
+        return AssetCache(root=self._root / name, max_bytes=self.max_bytes)
+
     def _path_for(self, digest: str) -> Path:
         return self._root / f'{digest}.bin'

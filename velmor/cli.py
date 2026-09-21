@@ -19,6 +19,7 @@ from packages.core.src.bootstrap.platform_settings import PlatformSettings
 from packages.core.src.bootstrap.project_root import PROJECT_ROOT
 from packages.core.src.bootstrap.settings_loader import SettingsLoader
 from packages.core.src.errors import VelmorError
+from packages.services.src.domain.preview import CoverSource
 from velmor.agents.base import AgentCommand
 from velmor.container import Container
 
@@ -182,6 +183,92 @@ def publish(
     except (VelmorError, FileNotFoundError, ValueError) as error:
         typer.secho(f'error: {error}', fg=typer.colors.RED, err=True)
         raise typer.Exit(code=1) from error
+
+
+@app.command('curate')
+def curate(
+    model: Annotated[
+        str,
+        typer.Option('--model', help='Model the curation run proposes shop copy with'),
+    ],
+    environment: Annotated[
+        Environment,
+        typer.Option('--env', '-e', help='Deployment profile to load'),
+    ] = Environment.DEV,
+    limit: Annotated[
+        int,
+        typer.Option('--limit', help='Max catalogued goods to curate'),
+    ] = 200,
+    apply: Annotated[
+        bool,
+        typer.Option('--apply', help='Store what the run proposes; without it the run refuses'),
+    ] = False,
+) -> None:
+    """Fill in the shop copy and the categories of the goods for sale."""
+    # Imported here so `--help` and `sources` do not pay for the commerce stack.
+    from velmor.curate import CurateCommand
+
+    try:
+        loader = SettingsLoader(EnvFileResolver.resolve_api(environment))
+        CurateCommand(loader).run(model, limit, apply)
+    except (VelmorError, FileNotFoundError, ValueError) as error:
+        typer.secho(f'error: {error}', fg=typer.colors.RED, err=True)
+        raise typer.Exit(code=1) from error
+
+
+cover_app = typer.Typer(
+    help='Attach and list the covers shown for goods with no image of their own',
+    no_args_is_help=True,
+)
+
+
+@cover_app.command('set')
+def cover_set(
+    candidate: Annotated[str, typer.Option('--candidate', help='Catalogue id of the good')],
+    file: Annotated[Path, typer.Option('--file', help='Image file to attach')],
+    source: Annotated[
+        CoverSource,
+        typer.Option('--source', help='generated: made for this good. downloaded: obtained by us'),
+    ],
+    rights_note: Annotated[
+        str,
+        typer.Option('--rights-note', help='What permits us to show this image to buyers'),
+    ],
+    environment: Annotated[
+        Environment,
+        typer.Option('--env', '-e', help='Deployment profile to load'),
+    ] = Environment.DEV,
+) -> None:
+    """Attach a cover to a good that has no usable image of its own."""
+    from velmor.cover import CoverCommand
+
+    try:
+        loader = SettingsLoader(EnvFileResolver.resolve_api(environment))
+        CoverCommand(loader).attach(candidate, file, source, rights_note)
+    except (VelmorError, FileNotFoundError, ValueError) as error:
+        typer.secho(f'error: {error}', fg=typer.colors.RED, err=True)
+        raise typer.Exit(code=1) from error
+
+
+@cover_app.command('list')
+def cover_list(
+    environment: Annotated[
+        Environment,
+        typer.Option('--env', '-e', help='Deployment profile to load'),
+    ] = Environment.DEV,
+) -> None:
+    """List the covers attached to the catalogue."""
+    from velmor.cover import CoverCommand
+
+    try:
+        loader = SettingsLoader(EnvFileResolver.resolve_api(environment))
+        CoverCommand(loader).list()
+    except (VelmorError, FileNotFoundError, ValueError) as error:
+        typer.secho(f'error: {error}', fg=typer.colors.RED, err=True)
+        raise typer.Exit(code=1) from error
+
+
+app.add_typer(cover_app, name='cover')
 
 
 @app.command('seed-disclosure')

@@ -13,6 +13,7 @@ from fastapi.testclient import TestClient
 from pydantic import SecretStr
 
 from packages.api.src.app import ApiApplication
+from packages.api.tests.unit.storefront_services import build_catalogue, build_preview
 from packages.services.src.commerce.asset_cache import AssetCache
 from packages.services.src.commerce.checkout import CheckoutService
 from packages.services.src.commerce.delivery import DeliveryService
@@ -27,7 +28,6 @@ from packages.services.src.payments.bepaid_provider import BePaidProvider
 from packages.services.src.payments.stripe_provider import StripeProvider
 from packages.services.src.payments.stub_provider import StubPaymentProvider
 from packages.services.src.persistence.memory import InMemoryStore
-from packages.services.tests.conftest import build_candidate, build_record
 from packages.services.tests.unit.payments.test_stripe_provider import (
     completed_event_payload,
 )
@@ -87,17 +87,6 @@ class FixedClock:
 
     def __call__(self) -> datetime:
         return self.instant
-
-
-class _StaticCatalog:
-    def __init__(self, goods: tuple = ()) -> None:
-        self._goods = goods
-
-    async def published(self, limit: int) -> tuple:
-        return self._goods[:limit]
-
-    async def published_count(self) -> int:
-        return len(self._goods)
 
 
 def build_disclosure() -> SellerDisclosure:
@@ -207,11 +196,9 @@ class CommerceHarness:
             cache=cache,
             http=self.http,
         )
-        catalog = _StaticCatalog(((build_candidate(candidate_id=CANDIDATE_ID), build_record()),))
         self.client = TestClient(
             ApiApplication(
                 'test',
-                catalog,
                 grants=grants,
                 delivery=delivery,
                 entitlements=self.store,
@@ -222,11 +209,8 @@ class CommerceHarness:
                 bepaid=self.bepaid,
                 orders=self.store,
                 operator_refund_key=OPERATOR_KEY,
-                entries=self.store,
-                categories=self.store,
-                candidates=self.store,
-                catalogue_unit_amount=UNIT_AMOUNT,
-                catalogue_currency=CURRENCY,
+                catalogue=build_catalogue(self.store, UNIT_AMOUNT, CURRENCY),
+                preview=build_preview(self.store, cache, self.http),
                 storefront_domain='shop.example',
                 stub=self.stub,
             ).build()

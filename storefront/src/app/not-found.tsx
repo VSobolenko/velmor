@@ -1,20 +1,52 @@
 import Link from "next/link";
-import { ShopChrome } from "@/components/ShopChrome";
-import { copy } from "@/lib/copy";
-import styles from "./shop.module.css";
+import { headers } from "next/headers";
+import { CartProvider } from "@/components/CartProvider";
+import { SiteFooter } from "@/components/SiteFooter";
+import { SiteHeader } from "@/components/SiteHeader";
+import { buttonClassName } from "@/components/ui/Button";
+import { dictionaryFor, LOCALE_HEADER, resolveLocale } from "@/lib/i18n";
+import { localePath } from "@/lib/i18n/paths";
 
-export default function NotFound() {
+/**
+ * The 404 for a request that never reached a locale segment. `src/proxy.ts` leaves a path
+ * containing a dot unnegotiated, so there is no `[locale]/not-found.tsx` to render for it.
+ *
+ * A `not-found` boundary receives no route `params`, so the locale is read from the
+ * `x-pb-locale` header the proxy sets. When it is absent the default locale is used, which is
+ * the honest value for a request the shop could not localise. The chrome is rendered here
+ * because the root layout holds only `<html>` and `<body>`.
+ */
+export default async function NotFound() {
+  const headerStore = await headers();
+  const locale = resolveLocale(headerStore.get(LOCALE_HEADER));
+  const dict = dictionaryFor(locale);
+
   return (
-    <ShopChrome tagline={copy.notFound}>
-      <main className={styles.main}>
-        <h1 className={styles.heading}>{copy.notFound}</h1>
-        <p className={styles.empty}>{copy.notFoundBody}</p>
-        <p className={styles.actions}>
-          <Link className={styles.linkButton} href="/">
-            {copy.backToShop}
-          </Link>
-        </p>
+    <CartProvider
+      announcements={{
+        added: dict["cart.announceAdded"],
+        removed: dict["cart.announceRemoved"],
+        quantity: dict["cart.announceQuantity"],
+        cleared: dict["cart.announceCleared"],
+      }}
+    >
+      <SiteHeader locale={locale} dict={dict} />
+      <main
+        id="content"
+        className="mx-auto flex w-full max-w-6xl flex-col items-start gap-4 px-gutter py-section"
+      >
+        <h1 className="font-heading text-2xl font-semibold text-ink">
+          {dict["common.notFoundTitle"]}
+        </h1>
+        <p className="max-w-prose text-muted">{dict["common.notFoundBody"]}</p>
+        <Link
+          className={buttonClassName("primary", "md")}
+          href={localePath(locale, "/")}
+        >
+          {dict["common.backToShop"]}
+        </Link>
       </main>
-    </ShopChrome>
+      <SiteFooter locale={locale} dict={dict} />
+    </CartProvider>
   );
 }

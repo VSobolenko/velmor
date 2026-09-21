@@ -9,6 +9,7 @@ from fastapi.testclient import TestClient
 from pydantic import SecretStr
 
 from packages.api.src.app import ApiApplication
+from packages.api.tests.unit.storefront_services import build_catalogue, build_preview
 from packages.services.src.commerce.asset_cache import AssetCache
 from packages.services.src.commerce.checkout import CheckoutService
 from packages.services.src.commerce.delivery import DeliveryService
@@ -36,14 +37,6 @@ class FixedClock:
 
     def __call__(self) -> datetime:
         return self.instant
-
-
-class EmptyCatalog:
-    async def published(self, limit: int):
-        return ()
-
-    async def published_count(self) -> int:
-        return 0
 
 
 def build_client(*, environment: str, storefront_domain: str, tmp_path: Path) -> TestClient:
@@ -81,7 +74,6 @@ def build_client(*, environment: str, storefront_domain: str, tmp_path: Path) ->
     return TestClient(
         ApiApplication(
             environment,
-            EmptyCatalog(),
             grants=grants,
             delivery=delivery,
             entitlements=store,
@@ -92,11 +84,8 @@ def build_client(*, environment: str, storefront_domain: str, tmp_path: Path) ->
             bepaid=bepaid,
             orders=store,
             operator_refund_key=OPERATOR_KEY,
-            entries=store,
-            categories=store,
-            candidates=store,
-            catalogue_unit_amount=UNIT_AMOUNT,
-            catalogue_currency=CURRENCY,
+            catalogue=build_catalogue(store, UNIT_AMOUNT, CURRENCY),
+            preview=build_preview(store, cache, http),
             storefront_domain=storefront_domain,
         ).build()
     )

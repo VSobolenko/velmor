@@ -4,10 +4,17 @@ from typing import Protocol, runtime_checkable
 
 from packages.services.src.domain.candidate import Candidate
 from packages.services.src.domain.catalogue import CatalogueEntry
+from packages.services.src.domain.catalogue_query import (
+    CatalogueFilter,
+    CatalogueMatches,
+    CategoryGoodsCount,
+)
 from packages.services.src.domain.category import Category
 from packages.services.src.domain.entitlement import Entitlement
 from packages.services.src.domain.gate import GateDecision
 from packages.services.src.domain.order import Order
+from packages.services.src.domain.presentation import CataloguePresentation
+from packages.services.src.domain.preview import CatalogueCover
 from packages.services.src.domain.rights import RightsRecord
 from packages.services.src.domain.seller import SellerDisclosure
 
@@ -78,6 +85,24 @@ class StorefrontCatalog(Protocol):
         """
         ...
 
+    async def search(self, query: CatalogueFilter) -> CatalogueMatches:
+        """Catalogued goods matching the filters a store can apply on its own.
+
+        Category and licence are columns, so they are applied here. The text
+        term and the ordering are not: both depend on the title resolved for a
+        locale, which the service owns. ``total`` counts every match, never the
+        page a caller asked for.
+        """
+        ...
+
+    async def counts_by_category(self) -> tuple[CategoryGoodsCount, ...]:
+        """How many saleable goods each category holds.
+
+        A category holding no saleable good is absent from the result; a caller
+        reporting the shop's categories reports zero for it.
+        """
+        ...
+
 
 @runtime_checkable
 class CatalogueEntryRepository(Protocol):
@@ -141,6 +166,63 @@ class CategoryRepository(Protocol):
 
     async def delete_category(self, category_id: str) -> None:
         """Remove the category. A missing id is a no-op."""
+        ...
+
+
+@runtime_checkable
+class CataloguePresentationRepository(Protocol):
+    """Storage for the buyer-facing copy of a catalogued good, one row per locale.
+
+    Keyed by ``(candidate_id, locale)`` rather than by candidate with three
+    nullable columns, because resolving a locale is then a lookup and a
+    fallback instead of a truthiness test over a mostly-empty record. A
+    presentation carries no price and no licence, so this interface can never
+    become a second opinion about what may be sold.
+    """
+
+    async def save_presentation(self, presentation: CataloguePresentation) -> None:
+        """Store the row for its ``(candidate_id, locale)``, replacing any earlier one."""
+        ...
+
+    async def presentations_for(
+        self, candidate_id: str
+    ) -> tuple[CataloguePresentation, ...]:
+        """Every locale stored for one good, ordered by locale."""
+        ...
+
+    async def all_presentations(self) -> tuple[CataloguePresentation, ...]:
+        """Every stored presentation, ordered by candidate id then locale.
+
+        Named ``all_presentations`` rather than ``all`` because
+        ``CategoryRepository.all`` already holds that name on the shared store.
+        """
+        ...
+
+
+@runtime_checkable
+class CatalogueCoverRepository(Protocol):
+    """Storage for an operator-attached cover, one row per good.
+
+    ``digest`` locates bytes in the asset cache and never names the origin: a
+    cover is presentation, it never substitutes for the good at delivery, and
+    reading it must not be a way to obtain the good.
+    """
+
+    async def save_cover(self, cover: CatalogueCover) -> None:
+        """Store the cover for its good, replacing any earlier one."""
+        ...
+
+    async def cover_for(self, candidate_id: str) -> CatalogueCover | None:
+        """The cover attached to this good, or ``None`` if none was attached.
+
+        Named ``cover_for`` rather than ``by_candidate`` because
+        ``CatalogueEntryRepository.by_candidate`` already holds that name on the
+        shared store.
+        """
+        ...
+
+    async def all_covers(self) -> tuple[CatalogueCover, ...]:
+        """Every attached cover, ordered by candidate id."""
         ...
 
 

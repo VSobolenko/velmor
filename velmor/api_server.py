@@ -23,9 +23,13 @@ from packages.core.src.bootstrap.environment import Environment
 from packages.core.src.bootstrap.observability import Observability
 from packages.core.src.bootstrap.settings_loader import SettingsLoader
 from packages.services.src.commerce.asset_cache import AssetCache
+from packages.services.src.commerce.catalogue_service import StorefrontCatalogue
 from packages.services.src.commerce.checkout import CheckoutService
 from packages.services.src.commerce.delivery import DeliveryService
+from packages.services.src.commerce.derivative import PreviewDerivative
 from packages.services.src.commerce.grants import DeliveryGrantService
+from packages.services.src.commerce.presentation_service import PresentationService
+from packages.services.src.commerce.preview import GoodPreview
 from packages.services.src.payments.bepaid_provider import BePaidProvider
 from packages.services.src.payments.protocol import PaymentProvider
 from packages.services.src.payments.stripe_provider import StripeProvider
@@ -95,6 +99,23 @@ class ApiServer:
             entitlements=store,
             providers=providers,
         )
+        catalogue = StorefrontCatalogue(
+            catalog=store,
+            entries=store,
+            categories=store,
+            candidates=store,
+            covers=store,
+            presentations=PresentationService(store),
+            unit_amount=self._settings.catalogue_unit_amount,
+            currency=self._settings.catalogue_currency,
+        )
+        preview = GoodPreview(
+            entries=store,
+            covers=store,
+            cache=cache,
+            http=http,
+            derivative=PreviewDerivative(cache),
+        )
 
         @asynccontextmanager
         async def lifespan(_app: FastAPI):
@@ -105,7 +126,8 @@ class ApiServer:
 
         return ApiApplication(
             self._settings.environment,
-            store,
+            catalogue=catalogue,
+            preview=preview,
             grants=grants,
             delivery=delivery,
             entitlements=store,
@@ -116,11 +138,6 @@ class ApiServer:
             bepaid=bepaid,
             orders=store,
             operator_refund_key=self._settings.operator_refund_key,
-            entries=store,
-            categories=store,
-            candidates=store,
-            catalogue_unit_amount=self._settings.catalogue_unit_amount,
-            catalogue_currency=self._settings.catalogue_currency,
             storefront_domain=self._settings.storefront_domain,
             stub=stub,
             lifespan=lifespan,

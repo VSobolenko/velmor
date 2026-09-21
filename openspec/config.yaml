@@ -69,6 +69,12 @@ rules:
       ENGINE_VERSION must be bumped.
     - Prefer one source done completely (declared licence, evidence, gate,
       provenance recorded) over several sources done partially.
+    - If the change adds or alters anything a buyer reads or acts on, include a
+      section stating what the buyer will SEE - the pages, the imagery, the copy
+      and its languages - and say that the localisation ships in the same change.
+      A change that ships an English-only or one-language surface says so
+      explicitly and justifies it. "The system now supports X" is not that
+      section.
   specs:
     - Write requirements as observable behaviour of the system, not as an
       implementation plan. "The gate SHALL refuse X and state why" is a
@@ -81,6 +87,21 @@ rules:
       source is unavailable, malformed, or contradicts itself.
     - Do not specify a field name that contradicts an existing model in
       packages/services/src/domain/.
+    - A requirement about a buyer-facing surface must state what the buyer SEES,
+      not only what the system does. "The goods in that category are listed" is
+      satisfied by a text dump, which is how a shop once shipped as a list of
+      filenames. Say that the goods are shown as cards with an image, a title, a
+      licence and a price.
+    - Every buyer-facing requirement needs a scenario for each state a buyer can
+      reach - empty, loading, error, not found, and partially configured. A page
+      whose states are unspecified is a page that will ship without them.
+    - Never specify a user-visible string literal, and never specify a language
+      that is hardcoded. Every buyer-visible string comes from a locale
+      dictionary; a capability that is buyer-facing is localised, and the set of
+      locales is a requirement, not an implementation detail.
+    - A requirement about presenting a good whose content is an image must say
+      how the image is shown, where it is derived from, and that the origin
+      location is not disclosed.
   design:
     - Say which layer each new piece belongs to and why, per
       .cursor/rules/02-architecture-layers.mdc.
@@ -91,6 +112,12 @@ rules:
       it later.
     - Name the failure modes and which one the design accepts.
     - Any new dependency needs a stated reason and a security note.
+    - Name the pattern each buyer-facing page follows and cite its source.
+      "I designed it" is not a source. The canonical distilled source is
+      .cursor/skills/storefront-ux/SKILL.md; a pattern it does not cover is
+      researched from a published source and cited here with what it recommends.
+    - For every buyer-facing page, list the locale keys it needs, the states it
+      renders, and the image it shows.
   tasks:
     - Each task is a unit one implementer subagent can finish and a reviewer can
       judge on its own.
@@ -100,6 +127,12 @@ rules:
       "add tests" task.
     - Order tasks so the deterministic layer is complete and tested before any
       agent node depends on it.
+    - A change with a buyer-facing surface includes a task that renders every
+      affected page at desktop and mobile width in every locale and records
+      screenshots as evidence. A passing suite is not evidence about a rendered
+      page, and a change with no such task is incomplete rather than lean.
+    - A change with a buyer-facing surface includes a task that runs
+      /ux-verify, the way a rights change includes /rights-verify.
 
 operations:
   apply:
@@ -112,9 +145,15 @@ operations:
         negotiable.
       - Do not add a ruff rule to `[tool.ruff.lint].select` in a different change
         from the one that removes its violations.
+      - When a task touches a buyer-facing surface, run `npm --prefix storefront
+        run lint` (it checks dictionary parity) and look at the rendered page.
+        Do not mark such a task done on the strength of a passing test suite.
   archive:
     guidance:
       - Summarise what changed in what Velmor may publish, if anything. An
         archive note that does not mention the effect on the catalogue is hiding
         the interesting part.
       - If ENGINE_VERSION moved, say so explicitly in the summary.
+      - State what changed for the buyer - which pages, which languages, which
+        imagery. A change that rebuilt a buyer-facing surface and does not say
+        so in the archive note has left the most visible part unrecorded.

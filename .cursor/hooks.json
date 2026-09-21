@@ -9,6 +9,12 @@
         "failClosed": true
       },
       {
+        "command": "node .cursor/hooks/ui-guard.cjs",
+        "matcher": "^(Write|StrReplace|EditNotebook)$",
+        "timeout": 10,
+        "failClosed": true
+      },
+      {
         "command": "node .cursor/hooks/policy-guard.cjs",
         "matcher": "^(Write|StrReplace|EditNotebook)$",
         "timeout": 10,
@@ -27,6 +33,12 @@
         "command": "node .cursor/hooks/lint-feedback.cjs",
         "matcher": "^(Write|StrReplace)$",
         "timeout": 60,
+        "failClosed": false
+      },
+      {
+        "command": "node .cursor/hooks/ui-feedback.cjs",
+        "matcher": "^(Write|StrReplace)$",
+        "timeout": 30,
         "failClosed": false
       }
     ]

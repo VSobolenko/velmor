@@ -3,11 +3,18 @@ from __future__ import annotations
 from collections.abc import Iterable
 
 from packages.services.src.domain.candidate import Candidate
-from packages.services.src.domain.catalogue import CatalogueEntry
+from packages.services.src.domain.catalogue import CatalogueEntry, SaleableEntry
+from packages.services.src.domain.catalogue_query import (
+    CatalogueFilter,
+    CatalogueMatches,
+    CategoryGoodsCount,
+)
 from packages.services.src.domain.category import Category
 from packages.services.src.domain.entitlement import Entitlement
 from packages.services.src.domain.gate import GateDecision
 from packages.services.src.domain.order import Order
+from packages.services.src.domain.presentation import CataloguePresentation, Locale
+from packages.services.src.domain.preview import CatalogueCover
 from packages.services.src.domain.rights import RightsRecord
 from packages.services.src.domain.seller import SellerDisclosure
 from packages.services.src.persistence.contract import SELLER_DISCLOSURE_KEY
@@ -34,6 +41,8 @@ class InMemoryStore:
         self._decisions: dict[str, GateDecision] = {}
         self._entries: dict[str, CatalogueEntry] = {}
         self._categories: dict[str, Category] = {}
+        self._presentations: dict[tuple[str, Locale], CataloguePresentation] = {}
+        self._covers: dict[str, CatalogueCover] = {}
         self._entitlements: dict[tuple[str, str], Entitlement] = {}
         self._disclosures: dict[str, SellerDisclosure] = {}
         self._orders: dict[str, Order] = {}
@@ -76,6 +85,29 @@ class InMemoryStore:
             if decision.publishable and candidate_id in self._candidates
         )
 
+    async def search(self, query: CatalogueFilter) -> CatalogueMatches:
+        matches = self._in_catalogue_order(
+            entry
+            for entry in self._entries.values()
+            if SaleableEntry.matches(entry)
+            and (query.category_id is None or entry.category_id == query.category_id)
+            and (query.license_id is None or entry.license_id == query.license_id)
+        )
+        return CatalogueMatches(entries=matches, total=len(matches))
+
+    async def counts_by_category(self) -> tuple[CategoryGoodsCount, ...]:
+        counts: dict[str, int] = {}
+        for entry in self._entries.values():
+            if not SaleableEntry.matches(entry) or entry.category_id is None:
+                continue
+            if entry.category_id not in counts:
+                counts[entry.category_id] = 0
+            counts[entry.category_id] = counts[entry.category_id] + 1
+        return tuple(
+            CategoryGoodsCount(category_id=category_id, count=counts[category_id])
+            for category_id in sorted(counts)
+        )
+
     async def save_entry(self, entry: CatalogueEntry) -> None:
         self._entries[entry.candidate_id] = entry
 
@@ -112,6 +144,45 @@ class InMemoryStore:
 
     async def delete_category(self, category_id: str) -> None:
         self._categories.pop(category_id, None)
+
+    async def save_presentation(self, presentation: CataloguePresentation) -> None:
+        self._presentations[(presentation.candidate_id, presentation.locale)] = presentation
+
+    async def presentations_for(
+        self, candidate_id: str
+    ) -> tuple[CataloguePresentation, ...]:
+        return tuple(
+            sorted(
+                (
+                    presentation
+                    for (stored_id, _locale), presentation in self._presentations.items()
+                    if stored_id == candidate_id
+                ),
+                key=lambda presentation: presentation.locale.value,
+            )
+        )
+
+    async def all_presentations(self) -> tuple[CataloguePresentation, ...]:
+        return tuple(
+            sorted(
+                self._presentations.values(),
+                key=lambda presentation: (
+                    presentation.candidate_id,
+                    presentation.locale.value,
+                ),
+            )
+        )
+
+    async def save_cover(self, cover: CatalogueCover) -> None:
+        self._covers[cover.candidate_id] = cover
+
+    async def cover_for(self, candidate_id: str) -> CatalogueCover | None:
+        return self._covers.get(candidate_id)
+
+    async def all_covers(self) -> tuple[CatalogueCover, ...]:
+        return tuple(
+            self._covers[candidate_id] for candidate_id in sorted(self._covers)
+        )
 
     async def save_entitlement(self, entitlement: Entitlement) -> None:
         self._entitlements[(entitlement.order_id, entitlement.candidate_id)] = entitlement

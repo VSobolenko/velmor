@@ -60,3 +60,19 @@ class CatalogueEntry(BaseModel):
     published_at: datetime
     content_digest: str
     origin_url: str
+
+
+class SaleableEntry:
+    """The two stored conditions that make a catalogue entry buyable.
+
+    Defined once and used by the stores and the read service alike: if the
+    store's filter and the service's check could drift apart, the shop would
+    advertise a good it cannot sell, or hide one it can.
+    """
+
+    @staticmethod
+    def matches(entry: CatalogueEntry) -> bool:
+        return (
+            entry.state is CatalogueEntryState.PUBLISHED
+            and entry.listing is StorefrontListing.PAID_OK
+        )

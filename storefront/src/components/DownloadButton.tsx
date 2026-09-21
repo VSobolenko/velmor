@@ -1,57 +1,57 @@
 "use client";
 
 import { useState } from "react";
-import {
-  CommerceApiClient,
-  CommerceApiError,
-} from "@/lib/api";
-import { copy } from "@/lib/copy";
-import styles from "@/app/shop.module.css";
+import { Button } from "@/components/ui/Button";
+import { CommerceApiClient } from "@/lib/api";
+import { dictionaryFor } from "@/lib/i18n";
+import { useLocale } from "@/lib/i18n/use-locale";
 
 type Props = {
   candidateId: string;
-  label?: string;
 };
 
-/** Issue a grant, fetch bytes with X-Buyer-Id, trigger a browser save. */
-export function DownloadButton({
-  candidateId,
-  label = copy.download,
-}: Props) {
+/**
+ * Issue a grant, fetch the bytes with the buyer header, trigger a browser save.
+ *
+ * Only an active entitlement should render this control; the grant endpoint refuses the rest,
+ * and that refusal is what the failure state reports.
+ */
+export function DownloadButton({ candidateId }: Props) {
+  const locale = useLocale();
+  const dict = dictionaryFor(locale);
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [failed, setFailed] = useState(false);
 
-  async function onClick() {
+  async function onClick(): Promise<void> {
     setBusy(true);
-    setError(null);
-    const client = CommerceApiClient.fromEnv();
+    setFailed(false);
+    const client = CommerceApiClient.fromEnv(locale);
     try {
       const grant = await client.issueGrant(candidateId);
       await client.saveDownload(grant.token, `${candidateId}.bin`);
-    } catch (err) {
-      if (err instanceof CommerceApiError) {
-        setError(err.detail);
-      } else if (err instanceof Error) {
-        setError(err.message);
-      } else {
-        setError(copy.downloadFailed);
-      }
-    } finally {
-      setBusy(false);
+    } catch {
+      setFailed(true);
     }
+    setBusy(false);
   }
 
   return (
-    <span className={styles.downloadControl}>
-      <button
-        type="button"
-        className={styles.button}
-        onClick={onClick}
-        disabled={busy}
+    <span className="flex flex-col items-start gap-1">
+      <Button
+        variant="secondary"
+        loading={busy}
+        loadingLabel={dict["account.downloadPreparing"]}
+        onClick={() => {
+          void onClick();
+        }}
       >
-        {busy ? copy.preparing : label}
-      </button>
-      {error !== null ? <p className={styles.error}>{error}</p> : null}
+        {dict["account.download"]}
+      </Button>
+      {failed ? (
+        <span role="alert" className="text-sm text-danger">
+          {dict["account.downloadFailed"]}
+        </span>
+      ) : null}
     </span>
   );
 }

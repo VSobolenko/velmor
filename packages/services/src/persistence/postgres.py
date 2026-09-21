@@ -5,11 +5,22 @@ from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
 from packages.services.src.domain.candidate import Candidate
-from packages.services.src.domain.catalogue import CatalogueEntry
+from packages.services.src.domain.catalogue import (
+    CatalogueEntry,
+    CatalogueEntryState,
+)
+from packages.services.src.domain.catalogue_query import (
+    CatalogueFilter,
+    CatalogueMatches,
+    CategoryGoodsCount,
+)
 from packages.services.src.domain.category import Category
 from packages.services.src.domain.entitlement import Entitlement
 from packages.services.src.domain.gate import GateDecision
+from packages.services.src.domain.license import StorefrontListing
 from packages.services.src.domain.order import Order
+from packages.services.src.domain.presentation import CataloguePresentation
+from packages.services.src.domain.preview import CatalogueCover
 from packages.services.src.domain.rights import RightsRecord
 from packages.services.src.domain.seller import SellerDisclosure
 from packages.services.src.persistence.contract import SELLER_DISCLOSURE_KEY
@@ -122,6 +133,59 @@ class PostgresStore:
         )
         async with self._session_factory() as session:
             return (await session.execute(statement)).scalar_one()
+
+    async def search(self, query: CatalogueFilter) -> CatalogueMatches:
+        """Every saleable match.
+
+        No ``limit``: the ordering the caller wants is by the title resolved for
+        a locale, which is not a column, so the rows have to reach the service
+        before they can be ordered or paged. ``total`` is the length of that
+        result for the same reason - the count cannot be taken before the text
+        term is applied either.
+        """
+        conditions = [
+            Schema.catalogue_entries.c.state == CatalogueEntryState.PUBLISHED.value,
+            Schema.catalogue_entries.c.listing == StorefrontListing.PAID_OK.value,
+        ]
+        if query.category_id is not None:
+            conditions.append(Schema.catalogue_entries.c.category_id == query.category_id)
+        if query.license_id is not None:
+            conditions.append(
+                Schema.catalogue_entries.c.entry['license_id'].astext == query.license_id
+            )
+        statement = (
+            select(Schema.catalogue_entries.c.entry)
+            .where(*conditions)
+            .order_by(
+                Schema.catalogue_entries.c.published_at.desc(),
+                Schema.catalogue_entries.c.candidate_id,
+            )
+        )
+        async with self._session_factory() as session:
+            rows = (await session.execute(statement)).mappings().all()
+        entries = tuple(CatalogueEntry.model_validate(row['entry']) for row in rows)
+        return CatalogueMatches(entries=entries, total=len(entries))
+
+    async def counts_by_category(self) -> tuple[CategoryGoodsCount, ...]:
+        statement = (
+            select(
+                Schema.catalogue_entries.c.category_id,
+                func.count().label('goods'),
+            )
+            .where(
+                Schema.catalogue_entries.c.state == CatalogueEntryState.PUBLISHED.value,
+                Schema.catalogue_entries.c.listing == StorefrontListing.PAID_OK.value,
+                Schema.catalogue_entries.c.category_id.is_not(None),
+            )
+            .group_by(Schema.catalogue_entries.c.category_id)
+            .order_by(Schema.catalogue_entries.c.category_id)
+        )
+        async with self._session_factory() as session:
+            rows = (await session.execute(statement)).mappings().all()
+        return tuple(
+            CategoryGoodsCount(category_id=row['category_id'], count=row['goods'])
+            for row in rows
+        )
 
     async def save(self, decision: GateDecision) -> None:
         statement = (
@@ -278,6 +342,96 @@ class PostgresStore:
         async with self._session_factory() as session:
             await session.execute(statement)
             await session.commit()
+
+    async def save_presentation(self, presentation: CataloguePresentation) -> None:
+        statement = (
+            insert(Schema.catalogue_presentations)
+            .values(
+                candidate_id=presentation.candidate_id,
+                locale=presentation.locale.value,
+                title=presentation.title,
+                source=presentation.source.value,
+                updated_at=presentation.updated_at,
+                presentation=presentation.model_dump(mode='json'),
+            )
+            .on_conflict_do_update(
+                index_elements=['candidate_id', 'locale'],
+                set_={
+                    'title': presentation.title,
+                    'source': presentation.source.value,
+                    'updated_at': presentation.updated_at,
+                    'presentation': presentation.model_dump(mode='json'),
+                },
+            )
+        )
+        async with self._session_factory() as session:
+            await session.execute(statement)
+            await session.commit()
+
+    async def presentations_for(
+        self, candidate_id: str
+    ) -> tuple[CataloguePresentation, ...]:
+        statement = (
+            select(Schema.catalogue_presentations.c.presentation)
+            .where(Schema.catalogue_presentations.c.candidate_id == candidate_id)
+            .order_by(Schema.catalogue_presentations.c.locale)
+        )
+        async with self._session_factory() as session:
+            rows = (await session.execute(statement)).mappings().all()
+        return tuple(
+            CataloguePresentation.model_validate(row['presentation']) for row in rows
+        )
+
+    async def all_presentations(self) -> tuple[CataloguePresentation, ...]:
+        statement = select(Schema.catalogue_presentations.c.presentation).order_by(
+            Schema.catalogue_presentations.c.candidate_id,
+            Schema.catalogue_presentations.c.locale,
+        )
+        async with self._session_factory() as session:
+            rows = (await session.execute(statement)).mappings().all()
+        return tuple(
+            CataloguePresentation.model_validate(row['presentation']) for row in rows
+        )
+
+    async def save_cover(self, cover: CatalogueCover) -> None:
+        statement = (
+            insert(Schema.catalogue_covers)
+            .values(
+                candidate_id=cover.candidate_id,
+                source=cover.source.value,
+                attached_at=cover.attached_at,
+                cover=cover.model_dump(mode='json'),
+            )
+            .on_conflict_do_update(
+                index_elements=['candidate_id'],
+                set_={
+                    'source': cover.source.value,
+                    'attached_at': cover.attached_at,
+                    'cover': cover.model_dump(mode='json'),
+                },
+            )
+        )
+        async with self._session_factory() as session:
+            await session.execute(statement)
+            await session.commit()
+
+    async def cover_for(self, candidate_id: str) -> CatalogueCover | None:
+        statement = select(Schema.catalogue_covers.c.cover).where(
+            Schema.catalogue_covers.c.candidate_id == candidate_id
+        )
+        async with self._session_factory() as session:
+            row = (await session.execute(statement)).mappings().one_or_none()
+        if row is None:
+            return None
+        return CatalogueCover.model_validate(row['cover'])
+
+    async def all_covers(self) -> tuple[CatalogueCover, ...]:
+        statement = select(Schema.catalogue_covers.c.cover).order_by(
+            Schema.catalogue_covers.c.candidate_id
+        )
+        async with self._session_factory() as session:
+            rows = (await session.execute(statement)).mappings().all()
+        return tuple(CatalogueCover.model_validate(row['cover']) for row in rows)
 
     async def save_entitlement(self, entitlement: Entitlement) -> None:
         statement = (

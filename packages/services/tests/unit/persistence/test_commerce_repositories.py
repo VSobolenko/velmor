@@ -9,9 +9,17 @@ from packages.services.src.domain.catalogue import CatalogueEntry, CatalogueEntr
 from packages.services.src.domain.category import Category
 from packages.services.src.domain.entitlement import Entitlement, EntitlementState
 from packages.services.src.domain.license import StorefrontListing
+from packages.services.src.domain.presentation import (
+    CataloguePresentation,
+    Locale,
+    PresentationSource,
+)
+from packages.services.src.domain.preview import CatalogueCover, CoverSource
 from packages.services.src.domain.seller import SellerDisclosure, SellerDisclosureItem
 from packages.services.src.persistence.contract import (
+    CatalogueCoverRepository,
     CatalogueEntryRepository,
+    CataloguePresentationRepository,
     CategoryRepository,
     EntitlementRepository,
     OrderRepository,
@@ -44,6 +52,37 @@ ALL_DISCLOSURE_ITEMS: tuple[SellerDisclosureItem, ...] = (
     SellerDisclosureItem.RETURN_RULES,
     SellerDisclosureItem.PAYMENT_SYSTEM_MARKS,
 )
+
+
+def build_presentation(
+    locale: Locale,
+    *,
+    candidate_id: str = 'openverse:1',
+    title: str = 'Curated title',
+) -> CataloguePresentation:
+    return CataloguePresentation(
+        candidate_id=candidate_id,
+        locale=locale,
+        title=title,
+        summary='Curated summary',
+        source=PresentationSource.MODEL,
+        updated_at=CATEGORY_CREATED_AT,
+    )
+
+
+def build_cover(
+    *,
+    candidate_id: str = 'openverse:1',
+    digest: str = '00' * 32,
+) -> CatalogueCover:
+    return CatalogueCover(
+        candidate_id=candidate_id,
+        digest=digest,
+        media_type='image/webp',
+        source=CoverSource.GENERATED,
+        rights_note='generated for this good by the operator',
+        attached_at=CATEGORY_CREATED_AT,
+    )
 
 
 def build_entry(
@@ -382,6 +421,79 @@ class TestSellerDisclosureRepository:
         assert check.incomplete(disclosure) == ()
 
 
+class TestCataloguePresentationRepository:
+    async def test_a_presentation_round_trips_per_locale(self) -> None:
+        store = InMemoryStore()
+        russian = build_presentation(Locale.RU, title='Русский')
+        english = build_presentation(Locale.EN, title='English')
+        await store.save_presentation(russian)
+        await store.save_presentation(english)
+
+        assert await store.presentations_for('openverse:1') == (english, russian)
+
+    async def test_saving_a_locale_again_replaces_that_row(self) -> None:
+        store = InMemoryStore()
+        await store.save_presentation(build_presentation(Locale.RU, title='Первое'))
+
+        await store.save_presentation(build_presentation(Locale.RU, title='Второе'))
+
+        rows = await store.presentations_for('openverse:1')
+        assert tuple(row.title for row in rows) == ('Второе',)
+
+    async def test_a_good_with_no_copy_has_no_rows(self) -> None:
+        store = InMemoryStore()
+
+        assert await store.presentations_for('openverse:missing') == ()
+
+    async def test_all_presentations_reaches_every_good(self) -> None:
+        store = InMemoryStore()
+        await store.save_presentation(
+            build_presentation(Locale.RU, candidate_id='openverse:1')
+        )
+        await store.save_presentation(
+            build_presentation(Locale.EN, candidate_id='openverse:2')
+        )
+
+        rows = await store.all_presentations()
+
+        assert {row.candidate_id for row in rows} == {'openverse:1', 'openverse:2'}
+
+
+class TestCatalogueCoverRepository:
+    async def test_a_cover_round_trips_by_candidate(self) -> None:
+        store = InMemoryStore()
+        cover = build_cover()
+
+        await store.save_cover(cover)
+
+        assert await store.cover_for('openverse:1') == cover
+
+    async def test_attaching_again_replaces_the_cover_of_that_good(self) -> None:
+        store = InMemoryStore()
+        await store.save_cover(build_cover())
+
+        second = build_cover(digest='11' * 32)
+        await store.save_cover(second)
+
+        assert await store.cover_for('openverse:1') == second
+
+    async def test_all_covers_are_ordered_by_candidate(self) -> None:
+        store = InMemoryStore()
+        await store.save_cover(build_cover(candidate_id='openverse:2'))
+        await store.save_cover(build_cover(candidate_id='openverse:1'))
+
+        assert tuple(cover.candidate_id for cover in await store.all_covers()) == (
+            'openverse:1',
+            'openverse:2',
+        )
+
+    async def test_a_good_with_no_cover_has_none(self) -> None:
+        store = InMemoryStore()
+
+        assert await store.cover_for('openverse:missing') is None
+        assert await store.all_covers() == ()
+
+
 class _IncompleteCatalogueEntryRepository:
     """Implements three of the four ``CatalogueEntryRepository`` methods."""
 
@@ -438,6 +550,8 @@ class TestRepositoryConformance:
         assert isinstance(store, EntitlementRepository)
         assert isinstance(store, SellerDisclosureRepository)
         assert isinstance(store, OrderRepository)
+        assert isinstance(store, CataloguePresentationRepository)
+        assert isinstance(store, CatalogueCoverRepository)
 
     async def test_the_postgres_store_satisfies_every_commerce_protocol(self) -> None:
         engine = create_async_engine(UNCONNECTED_DSN)
@@ -448,6 +562,8 @@ class TestRepositoryConformance:
         assert isinstance(store, EntitlementRepository)
         assert isinstance(store, SellerDisclosureRepository)
         assert isinstance(store, OrderRepository)
+        assert isinstance(store, CataloguePresentationRepository)
+        assert isinstance(store, CatalogueCoverRepository)
 
         await engine.dispose()
 

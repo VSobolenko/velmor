@@ -19,6 +19,10 @@ data/
 artifacts/
 extracted_images/
 
+# Git bundles are a transfer artifact, not history: they carry a full copy of
+# the repository and are rebuilt per deploy.
+*.bundle
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[codz]

@@ -1,6 +1,9 @@
+import type { Locale } from "@/lib/i18n";
 import type {
-  CatalogueGood,
-  CategoryDetail,
+  CatalogueCard,
+  CataloguePage,
+  CatalogueQuery,
+  CategoryPage,
   CategorySummary,
   CheckoutDisclosureResponse,
   CheckoutStartRequest,
@@ -13,28 +16,45 @@ import type {
 
 const BUYER_HEADER = "X-Buyer-Id";
 
+/**
+ * How the API answered a non-2xx status.
+ *
+ * `refusal` is a documented business response: `detail` is a sentence the API wrote for a
+ * person and the storefront may show it. `fault` is a validation rejection (422) or a server
+ * fault (5xx), and also any body that is not the API's `{"detail": string}` envelope: its
+ * `detail` is a diagnostic for logs and the caller must render a localized generic message
+ * instead of showing it.
+ */
+export type CommerceApiFailure = "refusal" | "fault";
+
+type ReadFailure = { detail: string; reason: CommerceApiFailure };
+
 export class CommerceApiError extends Error {
   readonly status: number;
   readonly detail: string;
+  readonly reason: CommerceApiFailure;
 
-  constructor(status: number, detail: string) {
+  constructor(status: number, detail: string, reason: CommerceApiFailure) {
     super(detail);
     this.name = "CommerceApiError";
     this.status = status;
     this.detail = detail;
+    this.reason = reason;
   }
 }
 
 export class CommerceApiClient {
   private readonly baseUrl: string;
   private readonly buyerId: string;
+  private readonly locale: Locale;
 
-  constructor(baseUrl: string, buyerId: string) {
+  constructor(baseUrl: string, buyerId: string, locale: Locale) {
     this.baseUrl = baseUrl.replace(/\/$/, "");
     this.buyerId = buyerId;
+    this.locale = locale;
   }
 
-  static fromEnv(): CommerceApiClient {
+  static fromEnv(locale: Locale): CommerceApiClient {
     const baseUrl = process.env.NEXT_PUBLIC_VELMOR_API_URL;
     const buyerId = process.env.NEXT_PUBLIC_BUYER_ID;
     if (baseUrl === undefined || baseUrl === "") {
@@ -43,7 +63,25 @@ export class CommerceApiClient {
     if (buyerId === undefined || buyerId === "") {
       throw new Error("NEXT_PUBLIC_BUYER_ID is required");
     }
-    return new CommerceApiClient(baseUrl, buyerId);
+    return new CommerceApiClient(baseUrl, buyerId, locale);
+  }
+
+  /**
+   * The API never negotiates: the storefront owns the locale and sends it, so a cached
+   * response cannot be handed to a reader of another language. An empty or absent value is
+   * left out rather than sent, so `?q=` never reads as a search for the empty string.
+   */
+  private cataloguePath(
+    path: string,
+    query: Record<string, string | number | undefined>,
+  ): string {
+    const params = new URLSearchParams({ locale: this.locale });
+    for (const [key, value] of Object.entries(query)) {
+      if (value !== undefined && value !== "") {
+        params.set(key, String(value));
+      }
+    }
+    return `${path}?${params.toString()}`;
   }
 
   async getHealth(): Promise<HealthResponse> {
@@ -53,27 +91,47 @@ export class CommerceApiClient {
   async listCategories(): Promise<CategorySummary[]> {
     return this.requestJson<CategorySummary[]>(
       "GET",
-      "/catalogue/categories",
+      this.cataloguePath("/catalogue/categories", {}),
       false,
     );
   }
 
-  async getCategory(slug: string): Promise<CategoryDetail> {
-    return this.requestJson<CategoryDetail>(
+  async getCategory(
+    slug: string,
+    query: Pick<CatalogueQuery, "limit" | "offset"> = {},
+  ): Promise<CategoryPage> {
+    return this.requestJson<CategoryPage>(
       "GET",
-      `/catalogue/categories/${encodeURIComponent(slug)}`,
+      this.cataloguePath(`/catalogue/categories/${encodeURIComponent(slug)}`, {
+        limit: query.limit,
+        offset: query.offset,
+      }),
       false,
     );
   }
 
-  async listGoods(): Promise<CatalogueGood[]> {
-    return this.requestJson<CatalogueGood[]>("GET", "/catalogue/goods", false);
+  async listGoods(query: CatalogueQuery = {}): Promise<CataloguePage> {
+    return this.requestJson<CataloguePage>(
+      "GET",
+      this.cataloguePath("/catalogue/goods", {
+        q: query.q,
+        sort: query.sort,
+        category: query.category,
+        license: query.license,
+        limit: query.limit,
+        offset: query.offset,
+      }),
+      false,
+    );
   }
 
-  async getGood(candidateId: string): Promise<CatalogueGood> {
-    return this.requestJson<CatalogueGood>(
+  async getGood(candidateId: string): Promise<CatalogueCard> {
+    return this.requestJson<CatalogueCard>(
       "GET",
-      `/catalogue/goods/${encodeURIComponent(candidateId)}`,
+      this.cataloguePath(
+        `/catalogue/goods/${encodeURIComponent(candidateId)}`,
+        {},
+      ),
       false,
     );
   }
@@ -137,8 +195,8 @@ export class CommerceApiClient {
       cache: "no-store",
     });
     if (!response.ok) {
-      const detail = await this.readErrorDetail(response);
-      throw new CommerceApiError(response.status, detail);
+      const failure = await this.readFailure(response);
+      throw new CommerceApiError(response.status, failure.detail, failure.reason);
     }
     const blob = await response.blob();
     const objectUrl = URL.createObjectURL(blob);
@@ -169,21 +227,40 @@ export class CommerceApiClient {
       cache: "no-store",
     });
     if (!response.ok) {
-      const detail = await this.readErrorDetail(response);
-      throw new CommerceApiError(response.status, detail);
+      const failure = await this.readFailure(response);
+      throw new CommerceApiError(response.status, failure.detail, failure.reason);
     }
     return (await response.json()) as T;
   }
 
-  private async readErrorDetail(response: Response): Promise<string> {
+  /**
+   * Classifies a non-2xx body. A 422 (FastAPI validation) or a 5xx is a fault, and so is any
+   * body that is not the API's JSON envelope: those are machine payloads and a caller must not
+   * print them. Only a `{"detail": "<sentence>"}` on a non-fault status is a refusal the
+   * storefront may show as written.
+   */
+  private async readFailure(response: Response): Promise<ReadFailure> {
     const text = await response.text();
-    if (text === "") {
-      return `HTTP ${response.status}`;
-    }
+    const status = `HTTP ${response.status}`;
     if (!text.startsWith("{")) {
-      return text;
+      return {
+        detail: text === "" ? status : text,
+        reason: "fault",
+      };
     }
-    const parsed: unknown = JSON.parse(text);
+    const message = this.stringDetail(JSON.parse(text));
+    if (
+      response.status === 422 ||
+      response.status >= 500 ||
+      message === null
+    ) {
+      return { detail: message ?? status, reason: "fault" };
+    }
+    return { detail: message, reason: "refusal" };
+  }
+
+  /** The API's human-readable message, or `null` when `detail` is a machine payload. */
+  private stringDetail(parsed: unknown): string | null {
     if (
       typeof parsed === "object" &&
       parsed !== null &&
@@ -192,6 +269,6 @@ export class CommerceApiClient {
     ) {
       return (parsed as { detail: string }).detail;
     }
-    return text;
+    return null;
   }
 }

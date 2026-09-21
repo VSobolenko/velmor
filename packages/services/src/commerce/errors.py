@@ -49,3 +49,32 @@ class GrantRefusedError(VelmorError):
 
 class CheckoutRefusedError(VelmorError):
     """Checkout refused payment; the message names the good or missing disclosure."""
+
+
+class PreviewNotFoundError(VelmorError):
+    """No preview exists for this good: unknown, withdrawn, or not decodable.
+
+    One error for the three cases on purpose. The buyer's page shows its own
+    placeholder whichever it is, and telling a caller apart "no such good" from
+    "not an image" would describe the origin, which concealment forbids.
+    """
+
+
+class PreviewDigestMismatchError(VelmorError):
+    """Origin bytes no longer match the digest recorded at publication."""
+
+
+class PreviewOriginUnreachableError(VelmorError):
+    """The origin could not be reached; the message must not name it."""
+
+
+class PreviewCoverMissingError(VelmorError):
+    """A cover is recorded for a good but its bytes are not in the asset cache."""
+
+
+class CoverRefusedError(VelmorError):
+    """A cover was refused: the good is not catalogued, or no permission is recorded."""
+
+
+class CurationRefusedError(VelmorError):
+    """A curation run could not store what it proposed."""

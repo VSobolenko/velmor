@@ -63,12 +63,7 @@ export type OrderLine = {
   quantity: number;
 };
 
-export type OrderState =
-  | "pending"
-  | "paid"
-  | "failed"
-  | "cancelled"
-  | "refunded";
+export type OrderState = "pending" | "paid" | "failed" | "cancelled" | "refunded";
 
 export type Order = {
   order_id: string;
@@ -92,24 +87,68 @@ export type ApiErrorBody = {
   detail: string;
 };
 
-export type CatalogueGood = {
+/**
+ * One good as a buyer sees it. Frozen by `.superpowers/sdd/redesign-storefront-ux/contract.md`.
+ *
+ * `origin_url`, `content_digest` and any storage path are forbidden in this shape: the origin
+ * is internal and a buyer-facing payload must never carry it.
+ */
+export type CatalogueCard = {
   candidate_id: string;
+  /** Resolved for the requested locale: presentation, then `ru`, then a shortened source title. */
   title: string;
+  /** Always the raw source title, whatever the locale. */
+  original_title: string;
+  summary: string | null;
   creator: string | null;
   license_id: string | null;
+  /** Every obligation recorded for the good, shown before purchase. */
   obligations: string[];
   category_id: string | null;
   category_slug: string | null;
   unit_amount: string;
   currency: string;
+  /** The API path; the storefront shows the good through `/media/preview/{candidate_id}`. */
+  preview_url: string;
+  preview_is_cover: boolean;
+  content_type: string;
+  size_bytes: number;
+  published_at: string;
+};
+
+export type CataloguePage = {
+  items: CatalogueCard[];
+  /** Every match, not the page. */
+  total: number;
+  limit: number;
+  offset: number;
+};
+
+export type CatalogueSort =
+  | "newest"
+  | "price_asc"
+  | "price_desc"
+  | "title_asc"
+  | "title_desc";
+
+export type CatalogueQuery = {
+  q?: string;
+  sort?: CatalogueSort;
+  category?: string;
+  license?: string;
+  limit?: number;
+  offset?: number;
 };
 
 export type CategorySummary = {
   category_id: string;
   name: string;
   slug: string;
+  /** Saleable goods in the category. */
+  count: number;
 };
 
-export type CategoryDetail = CategorySummary & {
-  goods: CatalogueGood[];
+export type CategoryPage = CategorySummary & {
+  items: CatalogueCard[];
+  total: number;
 };
