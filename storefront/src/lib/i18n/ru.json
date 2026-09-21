@@ -97,6 +97,7 @@
   "product.details": "Детали",
   "product.fileType": "Формат файла",
   "product.fileSize": "Размер файла",
+  "product.sizeUnknown": "Размер не указан",
   "product.delivery": "Доставка",
   "product.deliveryBody": "Ссылка на загрузку выдаётся в аккаунте после подтверждения оплаты.",
   "product.refund": "Возврат",

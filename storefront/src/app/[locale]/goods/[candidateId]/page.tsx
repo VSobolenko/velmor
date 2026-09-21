@@ -148,7 +148,9 @@ export default async function GoodPage({ params }: Props) {
             <div>
               <dt className="text-sm text-muted">{dict["product.fileSize"]}</dt>
               <dd className="text-base text-ink">
-                {formatFileSize(card.size_bytes, locale)}
+                {card.size_bytes === null
+                  ? dict["product.sizeUnknown"]
+                  : formatFileSize(card.size_bytes, locale)}
               </dd>
             </div>
             <div>

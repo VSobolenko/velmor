@@ -97,6 +97,7 @@
   "product.details": "Details",
   "product.fileType": "File format",
   "product.fileSize": "File size",
+  "product.sizeUnknown": "Size not stated",
   "product.delivery": "Delivery",
   "product.deliveryBody": "The download link is issued in your account after the payment is confirmed.",
   "product.refund": "Refunds",

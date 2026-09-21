@@ -97,6 +97,7 @@
   "product.details": "Дэталі",
   "product.fileType": "Фармат файла",
   "product.fileSize": "Памер файла",
+  "product.sizeUnknown": "Памер не ўказаны",
   "product.delivery": "Дастаўка",
   "product.deliveryBody": "Спасылка на загрузку выдаецца ва ўліковым запісе пасля пацверджання аплаты.",
   "product.refund": "Вяртанне",

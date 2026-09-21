@@ -112,7 +112,13 @@ export type CatalogueCard = {
   preview_url: string;
   preview_is_cover: boolean;
   content_type: string;
-  size_bytes: number;
+  /**
+   * `null` when the source never reported a size, which is not the same as zero and must not be
+   * rendered as a number: `catalogue_card.py` states that claiming a size we do not have is worse
+   * than stating that it is unknown. Typing this `number` is what let the storefront print
+   * "0 byte" for an unknown file on most of the catalogue, so the type carries the null.
+   */
+  size_bytes: number | null;
   published_at: string;
 };
 

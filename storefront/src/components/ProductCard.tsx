@@ -70,7 +70,9 @@ export function ProductCard({ card, locale, dict }: Props) {
         </h3>
         <p className="text-sm text-muted">{creator}</p>
         <p className="text-sm text-muted">
-          {formatFileSize(card.size_bytes, locale)}
+          {card.size_bytes === null
+            ? dict["product.sizeUnknown"]
+            : formatFileSize(card.size_bytes, locale)}
         </p>
         <div className="mt-auto flex items-center justify-between gap-3 pt-3">
           <PriceTag amount={card.unit_amount} currency={card.currency} />
