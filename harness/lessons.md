@@ -327,3 +327,73 @@ defect the next time", so the fix class matters more than the narrative.
 - Footnote on the same defect: a first draft of this entry was denied as well, because it quoted
   the matched fragment verbatim. The guard scans prose as readily as code, so a lesson about a
   false positive is itself a false positive unless the fragment is described rather than copied.
+
+### 2026-09-23 - a legal publication decision produced a good the shop could never show
+
+- Symptom: one published good advertised a preview that answered 404 in every locale.
+  `GET /catalogue/goods/{id}` said `200` and handed out a `preview_url`, and that URL said
+  `{"detail":"no preview exists for this good"}` - the same status and the same body the API uses
+  for a good that is not in the catalogue at all. The buyer saw the shop's placeholder tile.
+  Nothing in the payload separated the two states, because `preview_is_cover: false` is the
+  ordinary value for every good without an attached cover, so it is not a signal either.
+- Root cause: two defects with one origin. `ContentDigest.obtain` fetched the origin bytes,
+  computed their sha256 and returned, never inspecting what it had hashed, so publication
+  accepted `image/svg+xml` exactly like a JPEG. The refusal only arrived at render time, where
+  `PreviewDerivative.cut` could not decode it. And `PreviewNotFoundError` was raised from both
+  "there is no saleable entry" and "the payload is not decodable", with one row in
+  `PREVIEW_REFUSALS` mapping both to one 404 with one detail - so an operator could not tell a
+  withdrawn good from a format the renderer cannot read.
+- The class: a value that was computed and never inspected. The digest was the identity of the
+  bytes, and nothing ever asked whether those bytes could become the thing the shop sells. Every
+  test passed, the gate passed, and the good was legally publishable; it was simply unshowable.
+  This is the shape the project already knows from its surface defect: a pipeline that looks
+  correct end to end while nobody looks at its output.
+- Evidence: origin `.../Larch_botanical_illustration_labelled.svg` answered `200`, `134523`
+  bytes, `image/svg+xml`, and its sha256 matched the `content_digest` recorded at publication, so
+  the pipeline had stored a payload its own renderer cannot read; `Image.open` raised
+  `UnidentifiedImageError`. Measured scope: one `.svg` origin and one dead preview out of 104
+  published goods - a class of defect rather than an item, because Openverse and Wikimedia carry
+  diagrams and botanical illustrations as SVG at a rate that produces more.
+- Fix class: service + sensor + contract.
+- Change made: `packages/services/src/commerce/image_payload.py::ImagePayload` owns `Image.open`,
+  `MAX_DECODE_PIXELS` and the refusal reason, and both `digest.py` and `derivative.py` import it,
+  so exactly one module answers whether bytes can be rendered and the publication check cannot
+  drift from the renderer; `DigestResult.renderable` records that answer in the same pass that
+  hashed the bytes, so the digest and the judgement are about one payload rather than two;
+  `PublicationBridge` refuses an unrenderable payload, withdraws an entry that already has one and
+  leaves an already-withdrawn entry unchanged. The preview table now answers 404 only for "no
+  saleable good here" and reports an unrenderable payload as a preview that could not be
+  produced. OpenSpec change `refuse-unrenderable-origins` carries the contract; no rights,
+  screening, gate or storefront file changed, and no verdict can move.
+- Verification: after deploying `ecc85de` and running `velmor publish --env dev --limit 200`, the
+  report line read `withdrawn openverse:ce7c97e3-...: the origin payload cannot be rendered as a
+  preview`; the catalogue went 104 -> 103, the good answers 404 in `en`, `ru` and `be`, and all
+  103 remaining previews answer `200`. `/ux-verify` looked at 336 card images across 3 locales and
+  2 widths: 336 artwork, 0 placeholders, 0 broken tiles.
+- Recorded in the same pass, because it makes the difference visible: a second candidate,
+  `openverse:45acc41f-...`, is refused with `digest could not be obtained ... HTTP 404` - the
+  pre-existing unobtainable-digest behaviour, unchanged and still pinned by its test. A dead
+  origin and an unrenderable payload now read differently in the operator's report instead of
+  collapsing into one outcome.
+
+### 2026-09-23 - a health check on the wrong port called a service healthy while it starting
+
+- Symptom: after restarting `velmor-api.service`, every route through Caddy answered 502 and the
+  catalogue read 0 goods, including a control good that had served its preview minutes earlier.
+  It looked exactly like the change under verification had broken the shop.
+- Root cause: the liveness probe curled `127.0.0.1:8000` and read `200` from an unrelated service,
+  while `velmor-api.service` binds `0.0.0.0:8080`. The probe therefore exited after one second and
+  the verification requests fired into a uvicorn that had not finished starting - the service
+  takes about ten seconds to come up, most of it waiting on a Logfire call that returns 401 with
+  the token that is configured on the host. The 502s were Caddy reporting a closed upstream, not a
+  regression, and a re-run against the live service passed unchanged.
+- The class: a sensor that cannot fail. A probe that reads a port it does not own, and a sleep
+  that ends before the thing it waits for exists, both report success while the subject is down.
+  This is the same failure this file already records for `401` matching the ruff code `F401`: the
+  check passed for a reason unrelated to what it claimed to check.
+- Fix class: procedure, recorded here rather than mechanised: the probe is a one-off operator
+  script and does not belong in `scripts/`. What a future run must do is stated in the next line.
+- Change made: none to the harness. A readiness check must target the port the unit actually binds
+  (`systemctl cat velmor-api.service`) and must poll `/health` until it answers, not sleep a fixed
+  interval; `systemctl is-active` is not readiness. The `Logfire API returned status code 401`
+  startup delay is the separate operational item already named in `HANDOFF.md` section D.

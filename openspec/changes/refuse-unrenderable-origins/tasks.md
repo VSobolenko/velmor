@@ -6,7 +6,7 @@ adds the behaviour.
 
 ## 1. One place answers whether these bytes can be rendered
 
-- [ ] 1.1 Add `packages/services/src/commerce/image_payload.py` with `ImagePayload`, holding the
+- [x] 1.1 Add `packages/services/src/commerce/image_payload.py` with `ImagePayload`, holding the
       decode, the pixel bound (`MAX_DECODE_PIXELS`, moved out of `PreviewDerivative`), the refusal
       reason as one constant, `frame(body) -> Image.Image` and `can_render(body) -> bool`, and add
       `PreviewNotRenderableError` to `packages/services/src/commerce/errors.py` with a docstring
@@ -20,7 +20,7 @@ adds the behaviour.
       the bound and without translating Pillow's raises, show the new assertions failing, and
       restore. Quote both runs.
 
-- [ ] 1.2 Point `PreviewDerivative` at `ImagePayload.frame` and delete its own `Image.open`, its own
+- [x] 1.2 Point `PreviewDerivative` at `ImagePayload.frame` and delete its own `Image.open`, its own
       bound and its own translation of Pillow's errors, so `derivative.py` contains no
       `Image.open`, no `MAX_DECODE_PIXELS` and no `except OSError`. Update the three service-level
       tests that pin the old refusal type for a non-image payload:
@@ -34,7 +34,7 @@ adds the behaviour.
 
 ## 2. Publication refuses, and repairs
 
-- [ ] 2.1 Add `renderable: bool` to `DigestResult` and set it in `ContentDigest.obtain` from
+- [x] 2.1 Add `renderable: bool` to `DigestResult` and set it in `ContentDigest.obtain` from
       `ImagePayload.can_render(body)` over the same body it hashes, leaving the fetch, the hash,
       the size and the cache decision exactly as they are. Verify: `test_digest.py` gains a case
       asserting a PNG body yields `renderable is True`, and a case asserting an SVG body yields
@@ -42,7 +42,7 @@ adds the behaviour.
       the budget; the existing success, HTTP-error, transport-failure, over-threshold and
       blank-URL cases are unchanged and pass.
 
-- [ ] 2.2 Refuse an unrenderable payload in `PublicationBridge` and withdraw an entry that no
+- [x] 2.2 Refuse an unrenderable payload in `PublicationBridge` and withdraw an entry that no
       longer has one, in the shape the neighbouring causes already use: no entry -> `REFUSED` with
       the reason; published entry -> `WITHDRAWN` with the reason recorded; already withdrawn entry
       -> `UNCHANGED` with a reason saying the catalogue already matches. Build the refusal reason
@@ -54,7 +54,7 @@ adds the behaviour.
       unobtainable digest leaves the entry published); and
       `test_digest_unavailable_on_update_leaves_entry_unchanged` still passes unmodified.
 
-- [ ] 2.3 Make the cause visible in the operator's report. Verify: a new
+- [x] 2.3 Make the cause visible in the operator's report. Verify: a new
       `velmor/tests/unit/test_publish_command.py` builds the command over a complete fictional
       `.env` (the fixture `packages/api/tests/unit/configs/test_settings.py` already provides),
       calls the report method the publish loop uses for a `WITHDRAWN` outcome carrying the reason,
@@ -63,7 +63,7 @@ adds the behaviour.
 
 ## 3. The refusal contract
 
-- [ ] 3.1 Map the new refusal at the HTTP surface. Add
+- [x] 3.1 Map the new refusal at the HTTP surface. Add
       `PreviewNotRenderableError: (502, 'the preview could not be produced')` to
       `PREVIEW_REFUSALS`, narrow `PreviewNotFoundError`'s docstring to the cases it still means
       (unknown, withdrawn, not `PAID_OK`) and correct the comment above the table, which currently
@@ -73,7 +73,7 @@ adds the behaviour.
       by status; a new case asserts the 404 and 502 bodies are the fixed details and contain no
       origin; and `uv run python -m pytest packages/api -q` passes.
 
-- [ ] 3.2 Update the cited contract table in
+- [x] 3.2 Update the cited contract table in
       `.superpowers/sdd/redesign-storefront-ux/contract.md` so its preview rows match the code
       (`404` for not in the catalogue, withdrawn or not `PAID_OK`; `502` for an unreachable origin
       or a payload that cannot be rendered), and make the citation durable by having the
@@ -84,7 +84,7 @@ adds the behaviour.
 
 ## 4. The repair, and the buyer surface by looking at it
 
-- [ ] 4.1 Repair the already-published good. Run
+- [x] 4.1 Repair the already-published good. Run
       `uv run velmor publish --env dev --limit 200` and quote the report line for
       `openverse:ce7c97e3-e1dc-4576-874c-c981cb49d04e`: it must read `withdrawn` with the refusal
       reason, and the summary must count exactly one more withdrawal than before. Then confirm the
@@ -95,7 +95,7 @@ adds the behaviour.
       the same three responses from the deployed host. A repair that is only asserted in dev is not
       the repair the defect needs.
 
-- [ ] 4.2 Verify the buyer surface by looking at it. Run `/ux-verify` against the running shop and
+- [x] 4.2 Verify the buyer surface by looking at it. Run `/ux-verify` against the running shop and
       record screenshots of the catalogue and of one product page at 390 px and 1440 px in `en`,
       `ru` and `be`, showing previews rendered as images, no broken tile anywhere, and, for a good
       whose preview is refused, the shop's own placeholder. To have a refused preview on a listed
@@ -109,7 +109,7 @@ adds the behaviour.
       induced cause is named, the dev row is reverted, and a passing suite is explicitly not
       offered in place of the screenshots.
 
-- [ ] 4.3 Record the defect in `harness/lessons.md` (append only, with symptom, root cause, fix
+- [x] 4.3 Record the defect in `harness/lessons.md` (append only, with symptom, root cause, fix
       class, evidence and change made), naming the class: a value that was computed and never
       inspected, so a legal decision produced an unshowable good and no gate could see it. This
       task is Cursor's work and must not be delegated to a Codex worker, since `harness/**` is the
@@ -119,7 +119,7 @@ adds the behaviour.
 
 ## 5. Gates
 
-- [ ] 5.1 Run the change's own contract check and the standing gates, quoting output rather than
+- [x] 5.1 Run the change's own contract check and the standing gates, quoting output rather than
       summarising it: `uv run ruff check`, `uv run python -m pytest packages -q`,
       `uv run python -m compileall -q packages velmor`,
       `openspec validate --strict "refuse-unrenderable-origins"`. State explicitly whether
@@ -127,7 +127,7 @@ adds the behaviour.
       and this change does not touch one. Verify: the four command outputs are quoted, and any
       command not run is reported as unverified rather than implied to have passed.
 
-- [ ] 5.2 Run `/rights-verify` and state the outcome of the verdict path explicitly, including
+- [x] 5.2 Run `/rights-verify` and state the outcome of the verdict path explicitly, including
       that `RightsResolver.ENGINE_VERSION` did not move and that the publication gate still refuses
       what it must. Verify: the command's output is quoted, and the report says plainly that
       publication changed and the verdict path did not.
