@@ -14,12 +14,24 @@ from packages.services.src.commerce.errors import (
 )
 from packages.services.src.commerce.slugs import ProductSlug
 from packages.services.src.domain.catalogue import CatalogueEntry, CatalogueEntryState
+from packages.services.src.domain.category import CategoryName
 from packages.services.src.domain.license import StorefrontListing
+from packages.services.src.domain.presentation import Locale
 from packages.services.src.persistence.memory import InMemoryStore
 from packages.services.src.saleor.client import SaleorCategory, SaleorProduct
 
 NOW = datetime(2026, 9, 20, 12, 0, tzinfo=timezone.utc)
 EARLIER = datetime(2026, 9, 19, 8, 0, tzinfo=timezone.utc)
+NAMES = (
+    CategoryName(locale=Locale.RU, name='Фотографии'),
+    CategoryName(locale=Locale.BE, name='Фатаграфіі'),
+    CategoryName(locale=Locale.EN, name='Photographs'),
+)
+RENAMED_NAMES = (
+    CategoryName(locale=Locale.RU, name='Изображения'),
+    CategoryName(locale=Locale.BE, name='Выявы'),
+    CategoryName(locale=Locale.EN, name='Images'),
+)
 
 
 class FakeSaleor:
@@ -108,10 +120,11 @@ class TestCreate:
     async def test_create_succeeds_and_round_trips(
         self, service: CategoryService, store: InMemoryStore, saleor: FakeSaleor
     ) -> None:
-        category = await service.create(name='Photographs', slug='photographs', now=NOW)
+        category = await service.create(name='Photographs', slug='photographs', names=NAMES, now=NOW)
 
         assert category.name == 'Photographs'
         assert category.slug == 'photographs'
+        assert category.names == NAMES
         assert category.saleor_category_id == 'saleor-cat-1'
         assert category.created_at == NOW
         assert category.category_id == 'cat-photographs'
@@ -120,14 +133,30 @@ class TestCreate:
         assert category in await store.all()
         assert saleor.calls == [('create_category', 'Photographs', 'photographs')]
 
+    async def test_saleor_receives_one_name_while_every_name_is_stored(
+        self, service: CategoryService, store: InMemoryStore, saleor: FakeSaleor
+    ) -> None:
+        category = await service.create(
+            name='Photographs', slug='photographs', names=NAMES, now=NOW
+        )
+
+        # The external catalogue node has exactly one name; the buyer-facing
+        # names are ours and never travel to Saleor.
+        assert [call for call in saleor.calls if call[0] == 'create_category'] == [
+            ('create_category', 'Photographs', 'photographs')
+        ]
+        stored = await store.by_id(category.category_id)
+        assert stored is not None
+        assert stored.names == NAMES
+
     async def test_create_with_taken_slug_refuses_without_saleor(
         self, service: CategoryService, saleor: FakeSaleor
     ) -> None:
-        await service.create(name='Photographs', slug='photographs', now=NOW)
+        await service.create(name='Photographs', slug='photographs', names=NAMES, now=NOW)
         saleor.calls.clear()
 
         with pytest.raises(CategorySlugTakenError):
-            await service.create(name='Photos', slug='photographs', now=NOW)
+            await service.create(name='Photos', slug='photographs', names=NAMES, now=NOW)
 
         assert saleor.calls == []
 
@@ -136,15 +165,19 @@ class TestRename:
     async def test_rename_changes_name_and_slug(
         self, service: CategoryService, store: InMemoryStore, saleor: FakeSaleor
     ) -> None:
-        created = await service.create(name='Photographs', slug='photographs', now=NOW)
+        created = await service.create(name='Photographs', slug='photographs', names=NAMES, now=NOW)
         saleor.calls.clear()
 
         renamed = await service.rename(
-            created.category_id, new_name='Images', new_slug='images'
+            created.category_id,
+            new_name='Images',
+            new_slug='images',
+            new_names=RENAMED_NAMES,
         )
 
         assert renamed.name == 'Images'
         assert renamed.slug == 'images'
+        assert renamed.names == RENAMED_NAMES
         assert renamed.saleor_category_id == created.saleor_category_id
         assert await store.by_slug('photographs') is None
         assert await store.by_slug('images') == renamed
@@ -155,23 +188,31 @@ class TestRename:
     async def test_rename_that_collides_refuses_without_saleor(
         self, service: CategoryService, saleor: FakeSaleor
     ) -> None:
-        first = await service.create(name='Photographs', slug='photographs', now=NOW)
-        await service.create(name='Audio', slug='audio', now=NOW)
+        first = await service.create(name='Photographs', slug='photographs', names=NAMES, now=NOW)
+        await service.create(name='Audio', slug='audio', names=NAMES, now=NOW)
         saleor.calls.clear()
 
         with pytest.raises(CategorySlugTakenError):
-            await service.rename(first.category_id, new_name='Sound', new_slug='audio')
+            await service.rename(
+                first.category_id,
+                new_name='Sound',
+                new_slug='audio',
+                new_names=RENAMED_NAMES,
+            )
 
         assert saleor.calls == []
 
     async def test_rename_that_keeps_the_same_slug_succeeds(
         self, service: CategoryService, store: InMemoryStore, saleor: FakeSaleor
     ) -> None:
-        created = await service.create(name='Photographs', slug='photographs', now=NOW)
+        created = await service.create(name='Photographs', slug='photographs', names=NAMES, now=NOW)
         saleor.calls.clear()
 
         renamed = await service.rename(
-            created.category_id, new_name='Photos', new_slug='photographs'
+            created.category_id,
+            new_name='Photos',
+            new_slug='photographs',
+            new_names=RENAMED_NAMES,
         )
 
         assert renamed.name == 'Photos'
@@ -186,7 +227,7 @@ class TestRemove:
     async def test_remove_empty_category_deletes_in_saleor_and_store(
         self, service: CategoryService, store: InMemoryStore, saleor: FakeSaleor
     ) -> None:
-        created = await service.create(name='Photographs', slug='photographs', now=NOW)
+        created = await service.create(name='Photographs', slug='photographs', names=NAMES, now=NOW)
         saleor.calls.clear()
 
         await service.remove(created.category_id)
@@ -197,7 +238,7 @@ class TestRemove:
     async def test_remove_non_empty_category_refuses_without_saleor(
         self, service: CategoryService, store: InMemoryStore, saleor: FakeSaleor
     ) -> None:
-        created = await service.create(name='Photographs', slug='photographs', now=NOW)
+        created = await service.create(name='Photographs', slug='photographs', names=NAMES, now=NOW)
         await store.save_entry(
             published_entry(candidate_id='openverse:a', category_id=created.category_id)
         )
@@ -226,7 +267,7 @@ class TestAssign:
     async def test_assign_sets_category_on_published_entry(
         self, service: CategoryService, store: InMemoryStore, saleor: FakeSaleor
     ) -> None:
-        category = await service.create(name='Photographs', slug='photographs', now=NOW)
+        category = await service.create(name='Photographs', slug='photographs', names=NAMES, now=NOW)
         await store.save_entry(published_entry(candidate_id='openverse:1'))
         saleor.calls.clear()
 
@@ -251,7 +292,7 @@ class TestAssign:
     async def test_assign_missing_entry_refuses_without_saleor(
         self, service: CategoryService, saleor: FakeSaleor
     ) -> None:
-        category = await service.create(name='Photographs', slug='photographs', now=NOW)
+        category = await service.create(name='Photographs', slug='photographs', names=NAMES, now=NOW)
         saleor.calls.clear()
 
         with pytest.raises(CatalogueEntryNotFoundError):
@@ -273,7 +314,7 @@ class TestAssign:
     async def test_assign_withdrawn_entry_refuses_without_saleor(
         self, service: CategoryService, store: InMemoryStore, saleor: FakeSaleor
     ) -> None:
-        category = await service.create(name='Photographs', slug='photographs', now=NOW)
+        category = await service.create(name='Photographs', slug='photographs', names=NAMES, now=NOW)
         await store.save_entry(withdrawn_entry())
         saleor.calls.clear()
 
@@ -287,7 +328,7 @@ class TestUnassign:
     async def test_unassign_clears_category(
         self, service: CategoryService, store: InMemoryStore, saleor: FakeSaleor
     ) -> None:
-        category = await service.create(name='Photographs', slug='photographs', now=NOW)
+        category = await service.create(name='Photographs', slug='photographs', names=NAMES, now=NOW)
         await store.save_entry(
             published_entry(candidate_id='openverse:1', category_id=category.category_id)
         )

@@ -13,7 +13,7 @@ from packages.services.src.commerce.slugs import CategorySlug, ProductSlug
 from packages.services.src.domain.candidate import Candidate
 from packages.services.src.domain.catalogue import CatalogueEntry, CatalogueEntryState
 from packages.services.src.domain.catalogue_query import CatalogueFilter
-from packages.services.src.domain.category import Category
+from packages.services.src.domain.category import Category, CategoryName
 from packages.services.src.domain.curation import CurationProposal, LocaleCopy
 from packages.services.src.domain.license import StorefrontListing
 from packages.services.src.domain.presentation import (
@@ -32,6 +32,11 @@ SECOND = 'openverse:2'
 SLUG = 'photography'
 CATEGORY_NAME = 'Фотография'
 TITLE = 'Ночная съёмка'
+NAMES = (
+    CategoryName(locale=Locale.RU, name=CATEGORY_NAME),
+    CategoryName(locale=Locale.BE, name='Фатаграфія'),
+    CategoryName(locale=Locale.EN, name='Photography'),
+)
 
 
 class FakeSaleor:
@@ -66,17 +71,19 @@ class FixedProposer:
     def __init__(
         self,
         slug: str = SLUG,
-        category_name: str = CATEGORY_NAME,
+        category_names: tuple[CategoryName, ...] = NAMES,
         title: str = TITLE,
         summary: str = 'Снимок города после заката.',
     ) -> None:
         self._slug = slug
-        self._category_name = category_name
+        self._category_names = category_names
         self._title = title
         self._summary = summary
         self.asked: list[str] = []
 
-    async def propose(self, candidate: Candidate) -> CurationProposal:
+    async def propose(
+        self, candidate: Candidate, existing: tuple[Category, ...]
+    ) -> CurationProposal:
         self.asked.append(candidate.id)
         return CurationProposal(
             candidate_id=candidate.id,
@@ -94,8 +101,30 @@ class FixedProposer:
                 ),
             ),
             category_slug=self._slug,
-            category_name=self._category_name,
+            category_names=self._category_names,
         )
+
+
+class WriteCountingStore(InMemoryStore):
+    """An in-memory store that also counts the rows written through it.
+
+    The idempotence assertions observe that a repair wrote no copy and that a
+    no-op run wrote nothing at all, rather than inferring it from a title that
+    happens to look unchanged, so the store records every save it receives.
+    """
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.category_writes: list[str] = []
+        self.presentation_writes: list[tuple[str, Locale]] = []
+
+    async def save_category(self, category: Category) -> None:
+        self.category_writes.append(category.category_id)
+        await super().save_category(category)
+
+    async def save_presentation(self, presentation: CataloguePresentation) -> None:
+        self.presentation_writes.append((presentation.candidate_id, presentation.locale))
+        await super().save_presentation(presentation)
 
 
 class Asker:
@@ -105,7 +134,9 @@ class Asker:
         self._proposal = proposal
         self.asked: list[str] = []
 
-    async def propose(self, candidate: Candidate) -> CurationProposal:
+    async def propose(
+        self, candidate: Candidate, existing: tuple[Category, ...]
+    ) -> CurationProposal:
         self.asked.append(candidate.id)
         return self._proposal
 
@@ -146,7 +177,7 @@ def build_proposal(candidate_id: str = FIRST) -> CurationProposal:
             LocaleCopy(locale=Locale.EN, title='Night', summary='Summary'),
         ),
         category_slug=SLUG,
-        category_name=CATEGORY_NAME,
+        category_names=NAMES,
     )
 
 
@@ -176,7 +207,12 @@ async def stock(store: InMemoryStore, *candidate_ids: str) -> None:
         await store.save_entry(published_entry(candidate_id))
 
 
-async def store_category(store: InMemoryStore, name: str = CATEGORY_NAME, slug: str = SLUG) -> None:
+async def store_category(
+    store: InMemoryStore,
+    name: str = CATEGORY_NAME,
+    slug: str = SLUG,
+    names: tuple[CategoryName, ...] = NAMES,
+) -> None:
     await store.save_category(
         Category(
             category_id=f'cat-{slug}',
@@ -184,6 +220,7 @@ async def store_category(store: InMemoryStore, name: str = CATEGORY_NAME, slug: 
             slug=slug,
             saleor_category_id=f'saleor-{slug}',
             created_at=NOW,
+            names=names,
         )
     )
 
@@ -199,6 +236,21 @@ async def store_russian(store: InMemoryStore, candidate_id: str) -> None:
             updated_at=NOW,
         )
     )
+
+
+async def store_all_copy(store: InMemoryStore, candidate_id: str) -> None:
+    """Give a good operator copy in every served language, so curation writes none."""
+    for locale in Locale:
+        await store.save_presentation(
+            CataloguePresentation(
+                candidate_id=candidate_id,
+                locale=locale,
+                title=f'Готовое название {locale.value}',
+                summary=f'Готовая сводка {locale.value}',
+                source=PresentationSource.OPERATOR,
+                updated_at=NOW,
+            )
+        )
 
 
 class TestFillingMissingCopy:
@@ -294,9 +346,12 @@ class TestCategoryAssignment:
         run = await build_service(store, FixedProposer(), saleor).fill_missing(50)
 
         assert run.outcomes[0].category_slug == SLUG
+        assert run.outcomes[0].created_category is True
         category = await store.by_slug(SLUG)
         assert category is not None
+        # Saleor receives one name; every served language is stored here.
         assert category.name == CATEGORY_NAME
+        assert {name.locale for name in category.names} == set(Locale)
         assert category.category_id == f'cat-{SLUG}'
         entry = await store.by_candidate(FIRST)
         assert entry is not None
@@ -311,6 +366,40 @@ class TestCategoryAssignment:
                 category.saleor_category_id,
             ),
         ]
+
+    async def test_a_second_good_reuses_the_category_created_in_the_same_run(self) -> None:
+        store = InMemoryStore()
+        await stock(store, FIRST, SECOND)
+        saleor = FakeSaleor()
+
+        run = await build_service(store, FixedProposer(), saleor).fill_missing(50)
+
+        assert [call for call in saleor.calls if call[0] == 'create_category'] == [
+            ('create_category', CATEGORY_NAME, SLUG)
+        ]
+        by_candidate = {outcome.candidate_id: outcome for outcome in run.outcomes}
+        assert by_candidate[FIRST].created_category is True
+        assert by_candidate[SECOND].created_category is False
+        first_entry = await store.by_candidate(FIRST)
+        second_entry = await store.by_candidate(SECOND)
+        assert first_entry is not None
+        assert second_entry is not None
+        assert first_entry.category_id == f'cat-{SLUG}'
+        assert second_entry.category_id == f'cat-{SLUG}'
+        assert len([category for category in await store.all() if category.slug == SLUG]) == 1
+
+    async def test_a_good_fitting_no_category_creates_one_with_every_name(self) -> None:
+        store = InMemoryStore()
+        await stock(store, FIRST)
+        await store_category(store, name='Книги', slug='books')
+
+        await build_service(store, FixedProposer(), FakeSaleor()).fill_missing(50)
+
+        created = await store.by_slug(SLUG)
+        assert created is not None
+        assert {name.locale for name in created.names} == set(Locale)
+        assert all(name.name.strip() != '' for name in created.names)
+        assert {category.slug for category in await store.all()} == {'books', SLUG}
 
     async def test_an_existing_category_is_reused(self) -> None:
         store = InMemoryStore()
@@ -447,18 +536,64 @@ class TestRefusedProposals:
 
         assert await store.presentations_for(FIRST) == ()
 
-    async def test_a_proposal_that_names_neither_category_is_refused(self) -> None:
+    async def test_a_proposal_with_an_invalid_slug_or_an_empty_name_is_refused(self) -> None:
         store = InMemoryStore()
         await stock(store, FIRST)
 
         for proposal in (
             build_proposal().model_copy(update={'category_slug': 'Not A Slug'}),
-            build_proposal().model_copy(update={'category_name': '  '}),
+            build_proposal().model_copy(
+                update={
+                    'category_names': (
+                        CategoryName(locale=Locale.RU, name='   '),
+                        CategoryName(locale=Locale.BE, name='Фатаграфія'),
+                        CategoryName(locale=Locale.EN, name='Photography'),
+                    )
+                }
+            ),
         ):
             with pytest.raises(CurationRefusedError):
                 await build_service(store, Asker(proposal)).fill_missing(50)
 
         assert await store.by_slug('Not A Slug') is None
+        assert await store.by_slug(SLUG) is None
+
+    async def test_a_proposal_omitting_a_language_is_refused_and_writes_nothing(self) -> None:
+        store = InMemoryStore()
+        await stock(store, FIRST)
+        proposal = build_proposal().model_copy(
+            update={
+                'category_names': (
+                    CategoryName(locale=Locale.RU, name='Фотография'),
+                    CategoryName(locale=Locale.EN, name='Photography'),
+                )
+            }
+        )
+
+        with pytest.raises(CurationRefusedError) as raised:
+            await build_service(store, Asker(proposal)).fill_missing(50)
+
+        assert 'be' in str(raised.value)
+        assert await store.presentations_for(FIRST) == ()
+        assert await store.by_slug(SLUG) is None
+
+    async def test_an_empty_name_for_one_language_is_refused_naming_it(self) -> None:
+        store = InMemoryStore()
+        await stock(store, FIRST)
+        proposal = build_proposal().model_copy(
+            update={
+                'category_names': (
+                    CategoryName(locale=Locale.RU, name='Фотография'),
+                    CategoryName(locale=Locale.BE, name='   '),
+                    CategoryName(locale=Locale.EN, name='Photography'),
+                )
+            }
+        )
+
+        with pytest.raises(CurationRefusedError) as raised:
+            await build_service(store, Asker(proposal)).fill_missing(50)
+
+        assert 'be' in str(raised.value)
         assert await store.by_slug(SLUG) is None
 
     async def test_a_good_with_no_candidate_row_is_not_curated(self) -> None:
@@ -476,31 +611,61 @@ class TestCatalogueCurator:
     async def test_the_proposal_answers_for_every_served_language(self) -> None:
         curator = CatalogueCurator(TestModel())
 
-        proposal = await curator.propose(build_candidate(candidate_id=FIRST, title='DSC_0421.png'))
+        proposal = await curator.propose(
+            build_candidate(candidate_id=FIRST, title='DSC_0421.png'), ()
+        )
 
         assert proposal.candidate_id == FIRST
         assert tuple(copy.locale for copy in proposal.copy_by_locale) == tuple(Locale)
         assert all(copy.title.strip() != '' for copy in proposal.copy_by_locale)
         assert all(copy.summary.strip() != '' for copy in proposal.copy_by_locale)
         assert CategorySlug.is_valid(proposal.category_slug)
-        assert proposal.category_name.strip() != ''
+        assert tuple(name.locale for name in proposal.category_names) == tuple(Locale)
+        assert all(name.name.strip() != '' for name in proposal.category_names)
 
     async def test_the_prompt_carries_the_record_and_not_the_origin_url(self) -> None:
         curator = CatalogueCurator(TestModel())
         candidate = build_candidate(candidate_id=FIRST, title='DSC_0421.png')
 
-        prompt = curator._prompt(candidate)
+        prompt = curator._prompt(candidate, ())
 
         assert 'DSC_0421.png' in prompt
         assert 'Example Author' in prompt
         assert candidate.landing_url not in prompt
         assert candidate.download_url not in prompt
 
+    async def test_the_prompt_lists_the_existing_categories_and_no_origin(self) -> None:
+        curator = CatalogueCurator(TestModel())
+        candidate = build_candidate(candidate_id=FIRST, title='DSC_0421.png')
+        existing = (
+            Category(
+                category_id=f'cat-{SLUG}',
+                name=CATEGORY_NAME,
+                slug=SLUG,
+                saleor_category_id=f'saleor-{SLUG}',
+                created_at=NOW,
+                names=NAMES,
+            ),
+        )
+
+        prompt = curator._prompt(candidate, existing)
+
+        assert SLUG in prompt
+        assert CATEGORY_NAME in prompt
+        assert candidate.landing_url not in prompt
+        assert candidate.download_url not in prompt
+
+    async def test_the_prompt_says_none_when_no_category_exists(self) -> None:
+        curator = CatalogueCurator(TestModel())
+        candidate = build_candidate(candidate_id=FIRST)
+
+        assert '- none' in curator._prompt(candidate, ())
+
     async def test_the_prompt_names_an_unknown_creator_as_unknown(self) -> None:
         curator = CatalogueCurator(TestModel())
         candidate = build_candidate(candidate_id=FIRST).model_copy(update={'creator': None})
 
-        assert 'unknown' in curator._prompt(candidate)
+        assert 'unknown' in curator._prompt(candidate, ())
 
 
 class TestTheResolutionSeesTheStoredCopy:
@@ -515,3 +680,144 @@ class TestTheResolutionSeesTheStoredCopy:
         )
         assert resolved.title == f'{TITLE} (en)'
         assert resolved.is_fallback_title is False
+
+
+class TestRepairingCategoryNames:
+    async def test_a_nameless_category_is_filled_without_rewriting_the_copy(self) -> None:
+        store = WriteCountingStore()
+        await stock(store, FIRST)
+        await store_category(store, names=())
+        await store.save_entry(
+            published_entry(FIRST).model_copy(update={'category_id': f'cat-{SLUG}'})
+        )
+        await store_all_copy(store, FIRST)
+        before = await store.presentations_for(FIRST)
+        copies_before = len(store.presentation_writes)
+        proposer = Asker(build_proposal(FIRST))
+
+        run = await build_service(store, proposer).fill_missing(50)
+
+        assert proposer.asked == [FIRST]
+        assert run.outcomes[0].wrote_presentation is False
+        assert run.outcomes[0].filled_category_names is True
+        assert run.outcomes[0].category_slug == SLUG
+        assert run.outcomes[0].created_category is False
+        assert await store.presentations_for(FIRST) == before
+        assert len(store.presentation_writes) == copies_before
+        category = await store.by_slug(SLUG)
+        assert category is not None
+        assert {name.locale for name in category.names} == set(Locale)
+
+    async def test_a_repair_adds_the_missing_languages_and_keeps_the_stored_one(self) -> None:
+        store = WriteCountingStore()
+        await stock(store, FIRST)
+        await store_category(
+            store, names=(CategoryName(locale=Locale.RU, name='Своё имя'),)
+        )
+        await store.save_entry(
+            published_entry(FIRST).model_copy(update={'category_id': f'cat-{SLUG}'})
+        )
+        await store_all_copy(store, FIRST)
+
+        await build_service(store, Asker(build_proposal(FIRST))).fill_missing(50)
+
+        category = await store.by_slug(SLUG)
+        assert category is not None
+        proposed = {name.locale: name.name for name in NAMES}
+        assert {name.locale: name.name for name in category.names} == {
+            Locale.RU: 'Своё имя',
+            Locale.BE: proposed[Locale.BE],
+            Locale.EN: proposed[Locale.EN],
+        }
+
+    async def test_a_repair_does_not_rename_the_category(self) -> None:
+        store = WriteCountingStore()
+        await stock(store, FIRST)
+        await store_category(store, name='Операторское имя', names=())
+        await store.save_entry(
+            published_entry(FIRST).model_copy(update={'category_id': f'cat-{SLUG}'})
+        )
+        await store_all_copy(store, FIRST)
+        before = await store.by_slug(SLUG)
+        saleor = FakeSaleor()
+
+        await build_service(store, Asker(build_proposal(FIRST)), saleor).fill_missing(50)
+
+        after = await store.by_slug(SLUG)
+        assert before is not None
+        assert after is not None
+        assert after.category_id == before.category_id
+        assert after.name == before.name
+        assert after.slug == before.slug
+        assert after.saleor_category_id == before.saleor_category_id
+        assert saleor.calls == []
+
+    async def test_a_second_run_repairs_nothing_and_asks_nothing(self) -> None:
+        store = WriteCountingStore()
+        await stock(store, FIRST)
+        await store_category(store, names=())
+        await store.save_entry(
+            published_entry(FIRST).model_copy(update={'category_id': f'cat-{SLUG}'})
+        )
+        await store_all_copy(store, FIRST)
+        proposer = Asker(build_proposal(FIRST))
+        service = build_service(store, proposer)
+
+        await service.fill_missing(50)
+        category_writes_after_repair = len(store.category_writes)
+        second = await service.fill_missing(50)
+
+        assert proposer.asked == [FIRST]
+        assert len(store.category_writes) == category_writes_after_repair
+        assert second.outcomes[0].wrote_presentation is False
+        assert second.outcomes[0].filled_category_names is False
+        assert second.outcomes[0].created_category is False
+
+    async def test_a_good_with_no_category_and_complete_copy_is_still_walked_past(self) -> None:
+        store = WriteCountingStore()
+        await stock(store, FIRST)
+        await store_all_copy(store, FIRST)
+        proposer = Asker(build_proposal(FIRST))
+
+        run = await build_service(store, proposer).fill_missing(50)
+
+        assert proposer.asked == []
+        assert run.outcomes[0].wrote_presentation is False
+        assert run.outcomes[0].filled_category_names is False
+        assert run.outcomes[0].category_slug is None
+        assert store.category_writes == []
+
+    async def test_the_outcome_separates_copy_written_from_names_filled(self) -> None:
+        created_store = WriteCountingStore()
+        await stock(created_store, FIRST)
+        created = await build_service(
+            created_store, Asker(build_proposal(FIRST))
+        ).fill_missing(50)
+
+        repaired_store = WriteCountingStore()
+        await stock(repaired_store, FIRST)
+        await store_category(repaired_store, names=())
+        await repaired_store.save_entry(
+            published_entry(FIRST).model_copy(update={'category_id': f'cat-{SLUG}'})
+        )
+        await store_all_copy(repaired_store, FIRST)
+        repaired = await build_service(
+            repaired_store, Asker(build_proposal(FIRST))
+        ).fill_missing(50)
+
+        passed_over_store = WriteCountingStore()
+        await stock(passed_over_store, FIRST)
+        await store_all_copy(passed_over_store, FIRST)
+        passed_over = await build_service(
+            passed_over_store, Asker(build_proposal(FIRST))
+        ).fill_missing(50)
+
+        assert created.outcomes[0].created_category is True
+        assert created.outcomes[0].filled_category_names is True
+        assert created.outcomes[0].wrote_presentation is True
+        assert repaired.outcomes[0].created_category is False
+        assert repaired.outcomes[0].filled_category_names is True
+        assert repaired.outcomes[0].wrote_presentation is False
+        assert passed_over.outcomes[0].filled_category_names is False
+        assert passed_over.outcomes[0].created_category is False
+        assert passed_over.outcomes[0].wrote_presentation is False

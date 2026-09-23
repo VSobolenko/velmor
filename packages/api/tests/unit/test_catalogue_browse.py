@@ -16,7 +16,7 @@ from packages.services.src.commerce.checkout import CheckoutService
 from packages.services.src.commerce.delivery import DeliveryService
 from packages.services.src.commerce.grants import DeliveryGrantService
 from packages.services.src.domain.catalogue import CatalogueEntry, CatalogueEntryState
-from packages.services.src.domain.category import Category
+from packages.services.src.domain.category import Category, CategoryName
 from packages.services.src.domain.license import StorefrontListing
 from packages.services.src.domain.presentation import (
     CataloguePresentation,
@@ -85,13 +85,20 @@ def build_category(
     category_id: str = 'cat-images',
     name: str = 'Images',
     slug: str = 'images',
+    names: tuple[CategoryName, ...] | None = None,
 ) -> Category:
+    resolved_names = (
+        names
+        if names is not None
+        else tuple(CategoryName(locale=locale, name=name) for locale in Locale)
+    )
     return Category(
         category_id=category_id,
         name=name,
         slug=slug,
         saleor_category_id='saleor-cat-1',
         created_at=EARLIER,
+        names=resolved_names,
     )
 
 
@@ -212,6 +219,32 @@ class TestCatalogueCategories:
 
         assert harness.client.get('/catalogue/categories', params={'locale': 'be'}).status_code == 200
         assert harness.client.get('/catalogue/categories', params={'locale': 'de'}).status_code == 422
+
+    async def test_each_locale_reads_the_name_stored_for_it(self, tmp_path: Path) -> None:
+        harness = CatalogueHarness(tmp_path)
+        await harness.store.save_category(
+            build_category(
+                names=(
+                    CategoryName(locale=Locale.RU, name='Изображения'),
+                    CategoryName(locale=Locale.BE, name='Выявы'),
+                    CategoryName(locale=Locale.EN, name='Images'),
+                )
+            )
+        )
+
+        english = harness.client.get(
+            '/catalogue/categories', params={'locale': 'en'}
+        ).json()
+        russian = harness.client.get(
+            '/catalogue/categories', params={'locale': 'ru'}
+        ).json()
+        belarusian = harness.client.get(
+            '/catalogue/categories', params={'locale': 'be'}
+        ).json()
+
+        assert [row['name'] for row in english] == ['Images']
+        assert [row['name'] for row in russian] == ['Изображения']
+        assert [row['name'] for row in belarusian] == ['Выявы']
 
 
 class TestCatalogueCategoryPage:

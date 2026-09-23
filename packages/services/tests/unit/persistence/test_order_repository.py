@@ -93,6 +93,7 @@ class TestOrderRepository:
             slug='shared',
             saleor_category_id='saleor-shared',
             created_at=CREATED_AT,
+            names=(),
         )
         order = build_order(order_id=shared_id)
         await store.save_category(category)

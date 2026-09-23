@@ -6,7 +6,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from packages.services.src.commerce.disclosure import SellerDisclosureCheck
 from packages.services.src.domain.catalogue import CatalogueEntry, CatalogueEntryState
-from packages.services.src.domain.category import Category
+from packages.services.src.domain.category import Category, CategoryName
 from packages.services.src.domain.entitlement import Entitlement, EntitlementState
 from packages.services.src.domain.license import StorefrontListing
 from packages.services.src.domain.presentation import (
@@ -153,6 +153,7 @@ def build_category(
     slug: str = 'photographs',
     saleor_category_id: str = 'saleor-cat-1',
     created_at: datetime = CATEGORY_CREATED_AT,
+    names: tuple[CategoryName, ...] = (),
 ) -> Category:
     return Category(
         category_id=category_id,
@@ -160,6 +161,7 @@ def build_category(
         slug=slug,
         saleor_category_id=saleor_category_id,
         created_at=created_at,
+        names=names,
     )
 
 
@@ -210,6 +212,173 @@ class TestCategoryRepository:
         await store.delete_category('cat-missing')
 
         assert await store.all() == ()
+
+    async def test_a_category_round_trips_every_name_it_was_saved_with(self) -> None:
+        store = InMemoryStore()
+        names = (
+            CategoryName(locale=Locale.RU, name='Фотография'),
+            CategoryName(locale=Locale.BE, name='Фатаграфія'),
+            CategoryName(locale=Locale.EN, name='Photography'),
+        )
+        category = build_category(names=names)
+
+        await store.save_category(category)
+
+        by_id = await store.by_id('cat-photographs')
+        by_slug = await store.by_slug('photographs')
+        assert by_id is not None
+        assert by_slug is not None
+        assert by_id.names == names
+        assert by_slug.names == names
+
+    async def test_all_order_follows_the_scalar_name_not_the_names(self) -> None:
+        store = InMemoryStore()
+        zebra = build_category(
+            category_id='cat-zebra',
+            name='Zebra',
+            slug='zebra',
+            names=(CategoryName(locale=Locale.EN, name='Aaa'),),
+        )
+        apple = build_category(
+            category_id='cat-apple',
+            name='Apple',
+            slug='apple',
+            names=(CategoryName(locale=Locale.EN, name='Zzz'),),
+        )
+        for category in (zebra, apple):
+            await store.save_category(category)
+
+        assert await store.all() == (apple, zebra)
+
+
+class RecordingResult:
+    """The ``mappings().all()`` result of one recorded statement."""
+
+    def __init__(self, rows: tuple[dict[str, object], ...]) -> None:
+        self._rows = rows
+
+    def mappings(self) -> RecordingResult:
+        return self
+
+    def all(self) -> tuple[dict[str, object], ...]:
+        return self._rows
+
+
+class RecordingSession:
+    """A session that records each ``execute`` and returns fixed rows."""
+
+    def __init__(self, rows: tuple[dict[str, object], ...]) -> None:
+        self._rows = rows
+        self.executed: list[object] = []
+
+    async def execute(self, statement: object) -> RecordingResult:
+        self.executed.append(statement)
+        return RecordingResult(self._rows)
+
+    async def commit(self) -> None:
+        return None
+
+    async def __aenter__(self) -> RecordingSession:
+        return self
+
+    async def __aexit__(self, *exc: object) -> None:
+        return None
+
+
+class RecordingSessionFactory:
+    """A session factory that hands out recording sessions and counts them."""
+
+    def __init__(self, rows: tuple[dict[str, object], ...]) -> None:
+        self._rows = rows
+        self.sessions: list[RecordingSession] = []
+
+    def __call__(self) -> RecordingSession:
+        session = RecordingSession(self._rows)
+        self.sessions.append(session)
+        return session
+
+    @property
+    def executes(self) -> int:
+        return sum(len(session.executed) for session in self.sessions)
+
+
+def category_read_row(
+    category_id: str,
+    name: str,
+    locale: Locale,
+) -> dict[str, object]:
+    """One joined row as ``PostgresStore._category_select`` labels its columns."""
+    return {
+        'category_id': category_id,
+        'category_name': name,
+        'slug': category_id.removeprefix('cat-'),
+        'saleor_category_id': f'saleor-{category_id}',
+        'created_at': CATEGORY_CREATED_AT,
+        'locale': locale.value,
+        'locale_name': f'{name} ({locale.value})',
+    }
+
+
+class TestPostgresCategoryReads:
+    """Listing categories is one statement, whatever the number of categories.
+
+    The names are joined for the whole list, so the statement count must not grow
+    with the size of the taxonomy. Constructed against a session-factory double,
+    because there is no database behind the conformance checks either.
+    """
+
+    async def test_all_issues_one_statement_for_one_category(self) -> None:
+        engine = create_async_engine(UNCONNECTED_DSN)
+        factory = RecordingSessionFactory((category_read_row('cat-a', 'Alpha', Locale.EN),))
+        store = PostgresStore(engine, factory)
+
+        categories = await store.all()
+
+        await engine.dispose()
+        assert factory.executes == 1
+        assert len(categories) == 1
+        assert categories[0].category_id == 'cat-a'
+        assert categories[0].names == (CategoryName(locale=Locale.EN, name='Alpha (en)'),)
+
+    async def test_all_issues_one_statement_for_many_categories(self) -> None:
+        rows = tuple(
+            category_read_row(f'cat-{index}', f'Name {index}', locale)
+            for index in range(3)
+            for locale in Locale
+        )
+        engine = create_async_engine(UNCONNECTED_DSN)
+        factory = RecordingSessionFactory(rows)
+        store = PostgresStore(engine, factory)
+
+        categories = await store.all()
+
+        await engine.dispose()
+        assert factory.executes == 1
+        assert tuple(category.category_id for category in categories) == (
+            'cat-0',
+            'cat-1',
+            'cat-2',
+        )
+        assert len(categories[0].names) == len(Locale)
+
+    async def test_a_category_with_no_name_rows_still_comes_back(self) -> None:
+        row = {
+            'category_id': 'cat-a',
+            'category_name': 'Alpha',
+            'slug': 'a',
+            'saleor_category_id': 'saleor-a',
+            'created_at': CATEGORY_CREATED_AT,
+            'locale': None,
+            'locale_name': None,
+        }
+        engine = create_async_engine(UNCONNECTED_DSN)
+        store = PostgresStore(engine, RecordingSessionFactory((row,)))
+
+        categories = await store.all()
+
+        await engine.dispose()
+        assert len(categories) == 1
+        assert categories[0].names == ()
 
 
 class TestCatalogueEntryRepository:

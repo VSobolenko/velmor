@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-from sqlalchemy import delete, func, select
+from collections.abc import Mapping, Sequence
+
+from sqlalchemy import Select, delete, func, select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
@@ -14,12 +16,12 @@ from packages.services.src.domain.catalogue_query import (
     CatalogueMatches,
     CategoryGoodsCount,
 )
-from packages.services.src.domain.category import Category
+from packages.services.src.domain.category import Category, CategoryName
 from packages.services.src.domain.entitlement import Entitlement
 from packages.services.src.domain.gate import GateDecision
 from packages.services.src.domain.license import StorefrontListing
 from packages.services.src.domain.order import Order
-from packages.services.src.domain.presentation import CataloguePresentation
+from packages.services.src.domain.presentation import CataloguePresentation, Locale
 from packages.services.src.domain.preview import CatalogueCover
 from packages.services.src.domain.rights import RightsRecord
 from packages.services.src.domain.seller import SellerDisclosure
@@ -281,6 +283,14 @@ class PostgresStore:
         return tuple(CatalogueEntry.model_validate(row['entry']) for row in rows)
 
     async def save_category(self, category: Category) -> None:
+        """Upsert the category and replace its names in one transaction.
+
+        The ``category`` JSONB column still receives the whole model, but it is
+        no longer a read path: a row written before this change cannot carry the
+        names, and ``Category.names`` has no default, so validation from JSONB
+        would fail on every existing row. The scalar columns and the
+        ``category_names`` table are what reads use.
+        """
         statement = (
             insert(Schema.categories)
             .values(
@@ -304,43 +314,79 @@ class PostgresStore:
         )
         async with self._session_factory() as session:
             await session.execute(statement)
+            await session.execute(
+                delete(Schema.category_names).where(
+                    Schema.category_names.c.category_id == category.category_id
+                )
+            )
+            if len(category.names) > 0:
+                await session.execute(
+                    insert(Schema.category_names).values(
+                        [
+                            {
+                                'category_id': category.category_id,
+                                'locale': name.locale.value,
+                                'name': name.name,
+                            }
+                            for name in category.names
+                        ]
+                    )
+                )
             await session.commit()
 
     async def by_id(self, category_id: str) -> Category | None:
-        statement = select(Schema.categories.c.category).where(
-            Schema.categories.c.category_id == category_id
-        )
-        async with self._session_factory() as session:
-            row = (await session.execute(statement)).mappings().one_or_none()
-        if row is None:
-            return None
-        return Category.model_validate(row['category'])
-
-    async def by_slug(self, slug: str) -> Category | None:
-        statement = select(Schema.categories.c.category).where(
-            Schema.categories.c.slug == slug
-        )
-        async with self._session_factory() as session:
-            row = (await session.execute(statement)).mappings().one_or_none()
-        if row is None:
-            return None
-        return Category.model_validate(row['category'])
-
-    async def all(self) -> tuple[Category, ...]:
-        statement = select(Schema.categories.c.category).order_by(
-            Schema.categories.c.name,
-            Schema.categories.c.category_id,
+        statement = (
+            self._category_select()
+            .where(Schema.categories.c.category_id == category_id)
+            .order_by(Schema.category_names.c.locale)
         )
         async with self._session_factory() as session:
             rows = (await session.execute(statement)).mappings().all()
-        return tuple(Category.model_validate(row['category']) for row in rows)
+        if len(rows) == 0:
+            return None
+        return self._category_from(rows)
 
-    async def delete_category(self, category_id: str) -> None:
-        statement = delete(Schema.categories).where(
-            Schema.categories.c.category_id == category_id
+    async def by_slug(self, slug: str) -> Category | None:
+        statement = (
+            self._category_select()
+            .where(Schema.categories.c.slug == slug)
+            .order_by(Schema.category_names.c.locale)
         )
         async with self._session_factory() as session:
-            await session.execute(statement)
+            rows = (await session.execute(statement)).mappings().all()
+        if len(rows) == 0:
+            return None
+        return self._category_from(rows)
+
+    async def all(self) -> tuple[Category, ...]:
+        """Every category from one statement, names included.
+
+        A read per category would make listing the taxonomy cost one query per
+        row, so the names are joined for the whole list. The order is the scalar
+        ``name`` then ``category_id`` then the locale, so it does not move with
+        the language a buyer reads.
+        """
+        statement = self._category_select().order_by(
+            Schema.categories.c.name,
+            Schema.categories.c.category_id,
+            Schema.category_names.c.locale,
+        )
+        async with self._session_factory() as session:
+            rows = (await session.execute(statement)).mappings().all()
+        return self._categories_from(rows)
+
+    async def delete_category(self, category_id: str) -> None:
+        async with self._session_factory() as session:
+            await session.execute(
+                delete(Schema.category_names).where(
+                    Schema.category_names.c.category_id == category_id
+                )
+            )
+            await session.execute(
+                delete(Schema.categories).where(
+                    Schema.categories.c.category_id == category_id
+                )
+            )
             await session.commit()
 
     async def save_presentation(self, presentation: CataloguePresentation) -> None:
@@ -597,6 +643,62 @@ class PostgresStore:
             'download_url': candidate.download_url,
             'size_bytes': candidate.size_bytes,
         }
+
+    @staticmethod
+    def _category_select() -> Select:
+        """The category columns with their names, from one left join.
+
+        The scalar column is labelled ``category_name`` because both tables have
+        a column called ``name``; an unlabelled join would collapse the two in
+        the result mapping and one of them would silently win.
+        """
+        return select(
+            Schema.categories.c.category_id,
+            Schema.categories.c.name.label('category_name'),
+            Schema.categories.c.slug,
+            Schema.categories.c.saleor_category_id,
+            Schema.categories.c.created_at,
+            Schema.category_names.c.locale,
+            Schema.category_names.c.name.label('locale_name'),
+        ).outerjoin(
+            Schema.category_names,
+            Schema.category_names.c.category_id == Schema.categories.c.category_id,
+        )
+
+    @classmethod
+    def _categories_from(cls, rows: Sequence[Mapping[str, object]]) -> tuple[Category, ...]:
+        """Group the joined rows into categories, in the order the query returned.
+
+        A category with no names comes back as one row with a null locale, so a
+        group is built by consecutive ``category_id`` rather than by name count.
+        """
+        categories: list[Category] = []
+        group: list[Mapping[str, object]] = []
+        for row in rows:
+            if len(group) > 0 and row['category_id'] != group[0]['category_id']:
+                categories.append(cls._category_from(group))
+                group = []
+            group.append(row)
+        if len(group) > 0:
+            categories.append(cls._category_from(group))
+        return tuple(categories)
+
+    @staticmethod
+    def _category_from(rows: Sequence[Mapping[str, object]]) -> Category:
+        first = rows[0]
+        names = tuple(
+            CategoryName(locale=Locale(row['locale']), name=row['locale_name'])
+            for row in rows
+            if row['locale'] is not None
+        )
+        return Category(
+            category_id=first['category_id'],
+            name=first['category_name'],
+            slug=first['slug'],
+            saleor_category_id=first['saleor_category_id'],
+            created_at=first['created_at'],
+            names=names,
+        )
 
     @staticmethod
     def _candidate_from(row: object) -> Candidate:

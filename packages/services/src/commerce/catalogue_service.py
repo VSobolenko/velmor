@@ -15,7 +15,12 @@ from packages.services.src.domain.catalogue_card import (
     CategorySummary,
 )
 from packages.services.src.domain.catalogue_query import CatalogueFilter, CatalogueSort
-from packages.services.src.domain.presentation import Locale, ResolvedPresentation
+from packages.services.src.domain.category import Category
+from packages.services.src.domain.presentation import (
+    DEFAULT_LOCALE,
+    Locale,
+    ResolvedPresentation,
+)
 from packages.services.src.persistence.contract import (
     CandidateRepository,
     CatalogueCoverRepository,
@@ -139,17 +144,22 @@ class StorefrontCatalogue:
         counts = {
             row.category_id: row.count for row in await self._catalog.counts_by_category()
         }
-        return tuple(
-            CategorySummary(
-                category_id=category.category_id,
-                name=category.name,
-                slug=category.slug,
-                count=counts[category.category_id]
-                if category.category_id in counts
-                else 0,
+        summaries: list[CategorySummary] = []
+        for category in categories:
+            name = self._resolved_category_name(category, locale)
+            if name is None:
+                continue
+            summaries.append(
+                CategorySummary(
+                    category_id=category.category_id,
+                    name=name,
+                    slug=category.slug,
+                    count=counts[category.category_id]
+                    if category.category_id in counts
+                    else 0,
+                )
             )
-            for category in categories
-        )
+        return tuple(summaries)
 
     async def category_page(
         self, slug: str, locale: Locale, limit: int, offset: int
@@ -157,13 +167,19 @@ class StorefrontCatalogue:
         category = await self._categories.by_slug(slug)
         if category is None:
             return None
+        name = self._resolved_category_name(category, locale)
+        if name is None:
+            # A category with no name in any language has no label to head its
+            # page with, and a slug is not a label. It reads as not found rather
+            # than as a page under a raw identifier.
+            return None
         page = await self.page(
             locale, CatalogueSort.NEWEST, None, slug, None, limit, offset
         )
         return CategoryPage(
             summary=CategorySummary(
                 category_id=category.category_id,
-                name=category.name,
+                name=name,
                 slug=category.slug,
                 count=page.total,
             ),
@@ -226,6 +242,25 @@ class StorefrontCatalogue:
         if category is None:
             return None
         return category.slug
+
+    @staticmethod
+    def _resolved_category_name(category: Category, locale: Locale) -> str | None:
+        """The buyer-facing name for a language, on the shop's fallback rule.
+
+        The requested language first, then ``DEFAULT_LOCALE``, then ``None``,
+        the same rule ``PresentationService`` applies to a good's title. The
+        scalar ``category.name`` is never returned here: it is the external
+        catalogue and ordering label, and a buyer reads a resolved name.
+
+        ``None`` is a real absence, and the caller decides what to do with it: a
+        category nothing can name is not a category a buyer may be shown under a
+        raw identifier.
+        """
+        for candidate_locale in (locale, DEFAULT_LOCALE):
+            for name in category.names:
+                if name.locale is candidate_locale:
+                    return name.name
+        return None
 
     @staticmethod
     def _matching_text(

@@ -12,7 +12,7 @@ from packages.services.src.commerce.errors import (
 )
 from packages.services.src.commerce.slugs import ProductSlug
 from packages.services.src.domain.catalogue import CatalogueEntry, CatalogueEntryState
-from packages.services.src.domain.category import Category
+from packages.services.src.domain.category import Category, CategoryName
 from packages.services.src.persistence.contract import (
     CatalogueEntryRepository,
     CategoryRepository,
@@ -54,7 +54,19 @@ class CategoryService:
         self._entries = entries
         self._saleor = saleor
 
-    async def create(self, name: str, slug: str, now: datetime) -> Category:
+    async def create(
+        self,
+        name: str,
+        slug: str,
+        names: tuple[CategoryName, ...],
+        now: datetime,
+    ) -> Category:
+        """Create a category, giving Saleor exactly one name and storing them all.
+
+        ``name`` is the single scalar the external catalogue node receives;
+        ``names`` are the buyer-facing names per language. The two are separate
+        because a Saleor node has one name and the shop serves several.
+        """
         if await self._categories.by_slug(slug) is not None:
             raise CategorySlugTakenError(f'category slug {slug!r} is already taken')
         saleor_category = await self._saleor.create_category(name=name, slug=slug)
@@ -64,11 +76,23 @@ class CategoryService:
             slug=slug,
             saleor_category_id=saleor_category.category_id,
             created_at=now,
+            names=names,
         )
         await self._categories.save_category(category)
         return category
 
-    async def rename(self, category_id: str, new_name: str, new_slug: str) -> Category:
+    async def rename(
+        self,
+        category_id: str,
+        new_name: str,
+        new_slug: str,
+        new_names: tuple[CategoryName, ...],
+    ) -> Category:
+        """Rename a category, sending Saleor one name and replacing all names.
+
+        ``new_name`` is the single scalar the external catalogue node receives;
+        ``new_names`` are the buyer-facing names per language.
+        """
         existing = await self._require_category(category_id)
         occupant = await self._categories.by_slug(new_slug)
         if occupant is not None and occupant.category_id != category_id:
@@ -84,6 +108,7 @@ class CategoryService:
             slug=new_slug,
             saleor_category_id=existing.saleor_category_id,
             created_at=existing.created_at,
+            names=new_names,
         )
         await self._categories.save_category(renamed)
         return renamed

@@ -73,6 +73,18 @@ class Schema:
         Column('category', JSONB, nullable=False),
     )
 
+    # Buyer-facing names live in their own table keyed (category_id, locale),
+    # mirroring catalogue_presentations. The shape adds a table rather than
+    # altering `categories`, because ensure_schema() is create_all and never
+    # alters, and the table already exists in the deployed databases.
+    category_names = Table(
+        'category_names',
+        metadata,
+        Column('category_id', Text, primary_key=True),
+        Column('locale', Text, primary_key=True),
+        Column('name', Text, nullable=False),
+    )
+
     catalogue_presentations = Table(
         'catalogue_presentations',
         metadata,

@@ -116,10 +116,19 @@ is the external catalogue, not what the storefront reads to show a name.
 **The already-curated categories are fixed by re-running curation, not by a data patch.**
 
 The 15 curated goods produced 9 categories with Russian names in the scalar only. After this change
-those categories have no `category_names` rows and the English surface would fall back to Russian.
-The migration is the operator pass over the whole catalogue, which is the same pass that fixes the
-fragmented taxonomy. This is why the change is worth landing before curating the remaining goods
-rather than after.
+those categories have no `category_names` rows, and the spec fixes what that means: a category with
+no name in any served language is not presented on the home tiles or in the filter, so those 9 are
+hidden rather than shown in a fallback language.
+
+A pass therefore has to reach them, and a good whose presentation is already complete must not be
+skipped while its category is still nameless. ``fill_missing`` treats "this good needs no copy **and**
+its category is named in every served language" as the condition to walk past; otherwise it proposes
+for the good, which writes no copy because ``_store`` fills only the locales the good is missing, and
+writes the category's absent names. That is what makes the migration reach the 9 without a data
+patch: the same pass, over the whole catalogue, that fixes the fragmented taxonomy.
+
+The migration is the operator pass over the whole catalogue. This is why the change is worth landing
+before curating the remaining goods rather than after.
 
 ## Risks / Trade-offs
 
@@ -127,9 +136,14 @@ rather than after.
   goes through one resolution point, and a test asserts that a resolved name is never equal to the
   scalar when the locale differs from the fallback. The role of the scalar is stated in the model and
   in the repository docstring.
-- *A category shows a Russian name to an English buyer during the window before re-curation* -> Known
-  and accepted for the 9 existing categories; the mitigation is that landing this change and running
-  the pass are one operation, and the curation rule refuses an incomplete proposal from then on.
+- *The 9 existing categories are hidden during the window before the pass* -> Known and accepted for
+  the interval between the deploy and the pass; the mitigation is that landing this change and running
+  the pass are one operation, and the pass reaches those categories because a good whose category is
+  nameless is proposed for rather than skipped. The alternative - falling back to the scalar name -
+  is what the spec forbids, because it shows a buyer a language they did not choose.
+- *A category name is written onto an existing category* -> The names that are already stored are
+  never overwritten; a proposal fills only the served languages the category is missing. A spec
+  scenario asserts this, and the pass is idempotent because a fully named category is not proposed for.
 - *Listing categories costs one query per category* -> The names are fetched for the whole list in one
   query. A test over a multi-category catalogue asserts the read count does not grow with the number
   of categories.
@@ -142,7 +156,10 @@ rather than after.
 ## Migration Plan
 
 1. Deploy. `ensure_schema()` creates `category_names`; no existing table is altered. A category with
-   no rows in the new table resolves to its scalar name, so the shop keeps working before the pass.
+   no rows in the new table has no buyer-facing name in any language, so it is not presented on the
+   home tiles or in the filter and its page reads as not found - which is why the pass in step 2 runs
+   in the same operation rather than later. The catalogue itself is unaffected: every good stays
+   browsable, searchable and purchasable.
 2. Run the curation pass over the catalogue. It writes names for every served language and reuses
    slugs, which also consolidates the fragmented categories.
 3. Verify on the running shop: the same category read in `en`, `ru` and `be` shows three names and an

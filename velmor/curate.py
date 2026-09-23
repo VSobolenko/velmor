@@ -20,7 +20,7 @@ from packages.core.src.bootstrap.settings_loader import SettingsLoader
 from packages.services.src.commerce.category_service import CategoryService
 from packages.services.src.commerce.curation import CatalogueCurator, CurationService
 from packages.services.src.commerce.presentation_service import PresentationService
-from packages.services.src.domain.curation import CurationRun
+from packages.services.src.domain.curation import CurationOutcome, CurationRun
 from packages.services.src.persistence.postgres import PostgresStore
 from packages.services.src.saleor.client import SaleorClient
 
@@ -30,7 +30,9 @@ class CurationReport:
 
     A good the run walked past is printed as itself rather than omitted. The
     question an operator asks after a run is "which goods still have no copy",
-    and a report that only listed what it wrote could not answer it.
+    and a report that only listed what it wrote could not answer it. A good that
+    wrote no copy but named its category is stated as such, so a repair pass
+    reads as the work it did rather than as a run that changed nothing.
     """
 
     def show(self, run: CurationRun) -> None:
@@ -38,9 +40,26 @@ class CurationReport:
         typer.echo(f'curated {curated} of {len(run.outcomes)} catalogued goods')
         for outcome in run.outcomes:
             if outcome.wrote_presentation:
-                typer.echo(f'  curated   {outcome.candidate_id} -> {outcome.category_slug}')
+                typer.echo(
+                    f'  curated   {outcome.candidate_id} -> {outcome.category_slug}'
+                    f'{self._category_state(outcome)}'
+                )
+            elif outcome.filled_category_names:
+                typer.echo(f'  names     {outcome.candidate_id} -> {outcome.category_slug}')
             else:
                 typer.echo(f'  unchanged {outcome.candidate_id} [{outcome.category_slug}]')
+
+    @staticmethod
+    def _category_state(outcome: CurationOutcome) -> str:
+        """Say whether the good's category was created or reused.
+
+        The taxonomy stays usable only if a pass reuses it, so the report states
+        which happened: a run that created a category per good reads differently
+        from one that assigned every good to a category it already had.
+        """
+        if outcome.created_category:
+            return ' (new category)'
+        return ' (reused category)'
 
     @staticmethod
     def _count(run: CurationRun, wrote: bool) -> int:

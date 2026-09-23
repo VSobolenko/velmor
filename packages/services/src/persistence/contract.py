@@ -145,7 +145,14 @@ class CategoryRepository(Protocol):
     Categories are explicit rows, not something inferred at render time from a
     model call (design D4). ``save_category`` upserts by ``category_id``;
     ``delete_category`` of a missing id is a no-op. ``all`` returns every
-    category ordered by ``name`` ascending, then ``category_id`` ascending.
+    category ordered by the scalar ``name`` ascending, then ``category_id``
+    ascending; that order does not depend on the language a buyer reads.
+
+    A category carries its buyer-facing names per locale in ``names``. The
+    scalar ``name`` is the external-catalogue and ordering value, not a
+    buyer-facing one: a surface resolves the name it shows from ``names`` for
+    the language being read, and a category with no names decodes as ``()``
+    rather than failing the read.
     """
 
     async def save_category(self, category: Category) -> None:

@@ -14,7 +14,7 @@ from packages.services.src.domain.catalogue import (
 )
 from packages.services.src.domain.catalogue_card import CatalogueCard
 from packages.services.src.domain.catalogue_query import CatalogueSort
-from packages.services.src.domain.category import Category
+from packages.services.src.domain.category import Category, CategoryName
 from packages.services.src.domain.license import StorefrontListing
 from packages.services.src.domain.presentation import (
     CataloguePresentation,
@@ -65,13 +65,20 @@ def build_category(
     category_id: str = 'cat-photography',
     name: str = 'Photography',
     slug: str = 'photography',
+    names: tuple[CategoryName, ...] | None = None,
 ) -> Category:
+    resolved_names = (
+        names
+        if names is not None
+        else tuple(CategoryName(locale=locale, name=name) for locale in Locale)
+    )
     return Category(
         category_id=category_id,
         name=name,
         slug=slug,
         saleor_category_id=f'saleor-{category_id}',
         created_at=EARLIER,
+        names=resolved_names,
     )
 
 
@@ -572,6 +579,59 @@ class TestCategories:
         assert page is not None
         assert page.items == ()
         assert page.total == 0
+
+    async def test_each_locale_reads_its_own_name_with_the_same_count(self) -> None:
+        store = InMemoryStore()
+        await store.save_category(
+            build_category(
+                names=(
+                    CategoryName(locale=Locale.RU, name='Фотография'),
+                    CategoryName(locale=Locale.BE, name='Фатаграфія'),
+                    CategoryName(locale=Locale.EN, name='Photography'),
+                )
+            )
+        )
+        await save_good(store, 'openverse:1', category_id='cat-photography')
+        catalogue = build_catalogue(store)
+
+        summaries = {
+            locale: await catalogue.category_summaries(locale) for locale in Locale
+        }
+
+        assert summaries[Locale.RU][0].name == 'Фотография'
+        assert summaries[Locale.BE][0].name == 'Фатаграфія'
+        assert summaries[Locale.EN][0].name == 'Photography'
+        assert {rows[0].count for rows in summaries.values()} == {1}
+
+    async def test_a_category_with_no_names_is_omitted_from_the_summaries(self) -> None:
+        store = InMemoryStore()
+        await store.save_category(build_category(names=()))
+
+        summaries = await build_catalogue(store).category_summaries(Locale.EN)
+
+        assert summaries == ()
+
+    async def test_a_missing_language_falls_back_to_the_shops_language(self) -> None:
+        store = InMemoryStore()
+        await store.save_category(
+            build_category(
+                names=(CategoryName(locale=Locale.RU, name='Фотография'),)
+            )
+        )
+
+        summaries = await build_catalogue(store).category_summaries(Locale.EN)
+
+        assert tuple(summary.name for summary in summaries) == ('Фотография',)
+
+    async def test_a_nameless_category_has_no_page(self) -> None:
+        store = InMemoryStore()
+        await store.save_category(build_category(names=()))
+        await save_good(store, category_id='cat-photography')
+
+        assert (
+            await build_catalogue(store).category_page('photography', Locale.RU, 24, 0)
+            is None
+        )
 
 
 class TestSaleabilityAgreement:

@@ -13,8 +13,10 @@ from packages.services.src.commerce.publication import (
 from packages.services.src.commerce.slugs import ProductSlug
 from packages.services.src.domain.candidate import Candidate
 from packages.services.src.domain.catalogue import CatalogueEntry, CatalogueEntryState
+from packages.services.src.domain.category import CategoryName
 from packages.services.src.domain.gate import GateDecision
 from packages.services.src.domain.license import StorefrontListing
+from packages.services.src.domain.presentation import Locale
 from packages.services.src.domain.publication import PublicationAction, PublicationOutcome
 from packages.services.src.domain.rights import RightsRecord
 from packages.services.src.domain.source import SourceSpec
@@ -561,7 +563,16 @@ class TestPublicationBridge:
         published = await bridge.apply(candidate, decision, spec, NOW)
         assert published.entry is not None
         categories = CategoryService(categories=store, entries=store, saleor=saleor)
-        category = await categories.create(name='Photographs', slug='photographs', now=NOW)
+        category = await categories.create(
+            name='Photographs',
+            slug='photographs',
+            names=(
+                CategoryName(locale=Locale.RU, name='Фотографии'),
+                CategoryName(locale=Locale.BE, name='Фатаграфіі'),
+                CategoryName(locale=Locale.EN, name='Photographs'),
+            ),
+            now=NOW,
+        )
         assert category.category_id == 'cat-photographs'
         assert category.saleor_category_id == 'saleor-cat-1'
         assert category.category_id != category.saleor_category_id

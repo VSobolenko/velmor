@@ -14,7 +14,9 @@ from packages.services.src.commerce.slugs import CategorySlug
 from packages.services.src.domain.candidate import Candidate
 from packages.services.src.domain.catalogue import CatalogueEntry
 from packages.services.src.domain.catalogue_query import CatalogueFilter
+from packages.services.src.domain.category import Category, CategoryName
 from packages.services.src.domain.curation import (
+    CategoryAssignment,
     CurationDraft,
     CurationOutcome,
     CurationProposal,
@@ -37,7 +39,9 @@ class CurationProposer(Protocol):
     text file - can be substituted without the run changing.
     """
 
-    async def propose(self, candidate: Candidate) -> CurationProposal: ...
+    async def propose(
+        self, candidate: Candidate, existing: tuple[Category, ...]
+    ) -> CurationProposal: ...
 
 
 class CatalogueCurator:
@@ -62,8 +66,10 @@ class CatalogueCurator:
         'under 240 characters. Do not invent a creator, a date, a place or a licence: state '
         'only what the record supports. Then choose one category for the work: give a short '
         'lowercase slug of hyphen-separated words (for example "photography" or '
-        '"public-domain-books") and the same category name in Russian. Use the same slug for '
-        'works of the same kind so the shop has a small set of categories, not one per work.'
+        '"public-domain-books") and the category name in Russian, Belarusian and English. '
+        'Use the same slug for works of the same kind so the shop has a small set of '
+        'categories, not one per work, and reuse an existing slug from the list of existing '
+        'categories when the work belongs to it.'
     )
 
     def __init__(self, model: str | Model) -> None:
@@ -73,8 +79,10 @@ class CatalogueCurator:
             system_prompt=self.SYSTEM_PROMPT,
         )
 
-    async def propose(self, candidate: Candidate) -> CurationProposal:
-        result = await self._agent.run(self._prompt(candidate))
+    async def propose(
+        self, candidate: Candidate, existing: tuple[Category, ...]
+    ) -> CurationProposal:
+        result = await self._agent.run(self._prompt(candidate, existing))
         draft = result.output
         return CurationProposal(
             candidate_id=candidate.id,
@@ -84,17 +92,52 @@ class CatalogueCurator:
                 LocaleCopy(locale=Locale.EN, title=draft.en_title, summary=draft.en_summary),
             ),
             category_slug=draft.category_slug,
-            category_name=draft.category_name,
+            category_names=(
+                CategoryName(locale=Locale.RU, name=draft.category_name_ru),
+                CategoryName(locale=Locale.BE, name=draft.category_name_be),
+                CategoryName(locale=Locale.EN, name=draft.category_name_en),
+            ),
         )
 
-    @staticmethod
-    def _prompt(candidate: Candidate) -> str:
+    @classmethod
+    def _prompt(cls, candidate: Candidate, existing: tuple[Category, ...]) -> str:
         creator = candidate.creator if candidate.creator is not None else 'unknown'
         return (
             f'Source title: {candidate.title}\n'
             f'Creator: {creator}\n'
             f'Content type: {candidate.content_type}\n'
             f'Discovered at source: {candidate.source_id}\n'
+            f'{cls._existing_categories_block(existing)}\n'
+        )
+
+    @classmethod
+    def _existing_categories_block(cls, existing: tuple[Category, ...]) -> str:
+        """The taxonomy the model may reuse, slug and names, with no origin.
+
+        The block carries no URL of any kind: the model is asked to place the
+        work in an existing category, not to fetch where the work came from. A
+        category that has no name in a served language is omitted rather than
+        listed with a hole, because a partially named category is not one the
+        model could reuse under a complete proposal.
+        """
+        lines = [
+            line
+            for line in (cls._existing_category_line(category) for category in existing)
+            if line is not None
+        ]
+        if len(lines) == 0:
+            lines = ['- none']
+        header = 'Existing categories (reuse a slug when the work belongs to it):'
+        return '\n'.join([header, *lines])
+
+    @staticmethod
+    def _existing_category_line(category: Category) -> str | None:
+        names = {name.locale: name.name for name in category.names}
+        if Locale.RU not in names or Locale.BE not in names or Locale.EN not in names:
+            return None
+        return (
+            f'- {category.slug}: ru={names[Locale.RU]}; '
+            f'be={names[Locale.BE]}; en={names[Locale.EN]}'
         )
 
 
@@ -103,9 +146,13 @@ class CurationService:
 
     A run walks the saleable catalogue and, for each good with a language it has
     no presentation for, stores what the proposer returned. It is idempotent by
-    construction rather than by a deduplication step: a good stored in every
-    served language is skipped, and a category is created only when its slug is
-    absent, so a second run with the same proposals writes nothing at all.
+    construction rather than by a deduplication step: a good is walked past only
+    when it has copy in every served language AND its own category is named in
+    every served language, and a category is created only when its slug is
+    absent, so a second run with the same proposals writes nothing at all. The
+    second half of the condition is what lets the same pass repair a category
+    created before names were localised: the good's copy is complete, so no copy
+    is written, and the proposal fills the category's absent names.
 
     Nothing here can change what may be sold. A presentation is copy and a
     category is a label; a good the gate refused is not in the catalogue to be
@@ -142,19 +189,30 @@ class CurationService:
 
     async def _curate(self, entry: CatalogueEntry) -> CurationOutcome:
         missing = await self._presentations.missing_locales(entry.candidate_id)
-        if not missing:
+        if not missing and await self._category_is_fully_named(entry.category_id):
             return CurationOutcome(
                 candidate_id=entry.candidate_id,
                 wrote_presentation=False,
+                filled_category_names=False,
                 category_slug=await self._slug_of(entry.category_id),
+                created_category=False,
             )
-        proposal = await self._proposer.propose(await self._require_candidate(entry))
+        # Read the taxonomy per proposal, not once per run: fill_missing creates
+        # categories as it loops, so a snapshot taken before the first good is
+        # stale by the second and a pass would create duplicates of its own work.
+        existing = await self._categories.all()
+        proposal = await self._proposer.propose(
+            await self._require_candidate(entry), existing
+        )
         self._require_storable(entry, proposal)
         await self._store(entry, proposal, missing)
+        assignment = await self._assign_category(entry, proposal)
         return CurationOutcome(
             candidate_id=entry.candidate_id,
-            wrote_presentation=True,
-            category_slug=await self._assign_category(entry, proposal),
+            wrote_presentation=len(missing) > 0,
+            filled_category_names=assignment.filled_names,
+            category_slug=assignment.slug,
+            created_category=assignment.created_category,
         )
 
     async def _store(
@@ -175,23 +233,80 @@ class CurationService:
                 now=self._clock(),
             )
 
+    async def _category_is_fully_named(self, category_id: str | None) -> bool:
+        """Whether this good's own category already has a name in every served language.
+
+        A good with no category needs no name repair, and neither does a
+        ``category_id`` that resolves to no stored category: a dangling
+        reference is not something a repair pass may fail on. This reads the
+        good's own category rather than the per-proposal taxonomy, because the
+        decision to walk past a good is made before a proposal exists.
+        """
+        if category_id is None:
+            return True
+        category = await self._categories.by_id(category_id)
+        if category is None:
+            return True
+        named = {name.locale for name in category.names}
+        return all(locale in named for locale in Locale)
+
     async def _assign_category(
         self, entry: CatalogueEntry, proposal: CurationProposal
-    ) -> str:
+    ) -> CategoryAssignment:
+        """Assign the good, creating the category only when its slug is absent.
+
+        An existing category keeps the names it already has: the proposal fills
+        only the served languages the category is missing, and a create writes
+        them all. Nothing else on an existing category changes, so a repair pass
+        cannot rename a category or reach the external catalogue with it. The
+        return reports creating, filling and reusing separately, because a
+        reused category that gained a name is not a created category.
+        """
         category = await self._categories.by_slug(proposal.category_slug)
+        created_category = False
+        filled_names = False
         if category is None:
             category = await self._category_service.create(
-                name=proposal.category_name,
+                name=self._category_name(proposal),
                 slug=proposal.category_slug,
+                names=proposal.category_names,
                 now=self._clock(),
             )
+            created_category = True
+            filled_names = True
+        else:
+            merged = self._merged_category_names(category.names, proposal.category_names)
+            if merged != category.names:
+                category = category.model_copy(update={'names': merged})
+                await self._categories.save_category(category)
+                filled_names = True
         if entry.category_id != category.category_id:
             await self._category_service.assign(
                 candidate_id=entry.candidate_id,
                 category_id=category.category_id,
                 product_name=self._product_name(proposal),
             )
-        return category.slug
+        return CategoryAssignment(
+            slug=category.slug,
+            created_category=created_category,
+            filled_names=filled_names,
+        )
+
+    @staticmethod
+    def _merged_category_names(
+        stored: tuple[CategoryName, ...], proposed: tuple[CategoryName, ...]
+    ) -> tuple[CategoryName, ...]:
+        """Every served language once, a stored name winning over a proposed one.
+
+        Ordered by ``Locale`` rather than by the order the proposal listed, so
+        the merged tuple is the same on any machine. A stored name is written
+        last and therefore kept, which is what makes a repair fill a gap without
+        overwriting an operator's copy.
+        """
+        by_locale = {name.locale: name for name in proposed}
+        for name in stored:
+            by_locale[name.locale] = name
+        return tuple(by_locale[locale] for locale in Locale)
 
     async def _require_candidate(self, entry: CatalogueEntry) -> Candidate:
         candidate = await self._candidates.by_candidate_id(entry.candidate_id)
@@ -232,8 +347,29 @@ class CurationService:
             raise CurationRefusedError(
                 f'curation proposed {proposal.category_slug!r}, which is not a category slug'
             )
-        if proposal.category_name.strip() == '':
-            raise CurationRefusedError('curation proposed a category with no name')
+        CurationService._require_category_names(proposal)
+
+    @staticmethod
+    def _require_category_names(proposal: CurationProposal) -> None:
+        """Refuse a category name set that does not cover every served language.
+
+        The reason names the absent language, so an operator reading the failure
+        knows which field to fix rather than which proposal to re-read. An empty
+        name is refused for the same reason: it renders as a blank label a buyer
+        cannot act on.
+        """
+        proposed = {name.locale for name in proposal.category_names}
+        absent = tuple(locale for locale in Locale if locale not in proposed)
+        if len(absent) > 0:
+            raise CurationRefusedError(
+                f'curation proposed no category name for '
+                f'{[locale.value for locale in absent]}'
+            )
+        for name in proposal.category_names:
+            if name.name.strip() == '':
+                raise CurationRefusedError(
+                    f'curation proposed an empty {name.locale.value} category name'
+                )
 
     async def _slug_of(self, category_id: str | None) -> str | None:
         if category_id is None:
@@ -250,4 +386,19 @@ class CurationService:
                 return copy.title
         raise CurationRefusedError(
             f'curation proposed no {Locale.RU.value} title to name the product with'
+        )
+
+    @staticmethod
+    def _category_name(proposal: CurationProposal) -> str:
+        """The one name the external catalogue node receives: the Russian one.
+
+        Saleor is the external catalogue, not what the storefront reads to show a
+        name, and a category node has exactly one name. The same rule
+        ``_product_name`` already applies to a product's name.
+        """
+        for name in proposal.category_names:
+            if name.locale is Locale.RU:
+                return name.name
+        raise CurationRefusedError(
+            f'curation proposed no {Locale.RU.value} category name to name the category with'
         )
