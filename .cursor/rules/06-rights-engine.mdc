@@ -44,8 +44,11 @@ deliberate act.
 - Every non-`PUBLISHABLE` decision carries at least one human-readable reason.
   A refusal with no reason is a bug: the reviewer cannot act on it and the audit
   cannot explain it.
-- `RightsDeniedError` is the guard for a caller that tries to publish without a
-  passing verdict. Do not catch it into a warning.
+- `RightsDeniedError` is the guard on the last door. `PublicationBridge.apply`
+  re-derives the gate's ruling from the decision's own record and raises it when a
+  caller presents a decision that claims the record is publishable while the gate
+  refuses: a caller's `publishable` flag is never the source of truth. It is
+  raised, not caught into a warning, and the bridge writes no entry for it.
 - A verdict is append-only. A correction is a new `RightsRecord` with a new
   timestamp and an author, never an edit of the old one.
 

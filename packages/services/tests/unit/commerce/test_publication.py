@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 
 import pytest
 
+from packages.core.src.errors import RightsDeniedError
 from packages.services.src.commerce.category_service import CategoryService
 from packages.services.src.commerce.errors import CategoryNotFoundError
 from packages.services.src.commerce.image_payload import ImagePayload
@@ -19,7 +20,7 @@ from packages.services.src.domain.gate import GateDecision
 from packages.services.src.domain.license import StorefrontListing
 from packages.services.src.domain.presentation import Locale
 from packages.services.src.domain.publication import PublicationAction, PublicationOutcome
-from packages.services.src.domain.rights import RightsRecord
+from packages.services.src.domain.rights import EvidenceKind, RightsRecord
 from packages.services.src.domain.source import SourceSpec
 from packages.services.src.persistence.memory import InMemoryStore
 from packages.services.src.rights.publication_gate import PublicationGate
@@ -133,6 +134,18 @@ def free_only_record() -> RightsRecord:
 
 def denied_record() -> RightsRecord:
     return build_record(license_id=None, verdict='denied')
+
+
+def no_source_evidence_record() -> RightsRecord:
+    """A record the gate refuses on evidence alone, and the cheapest one to build.
+
+    A model reading plus the identity match derived from it is the combination the
+    gate exists to refuse: the licence identity was matched against a known
+    licence, but nothing the source itself declared backs it.
+    """
+    return build_record(
+        evidence_kinds=(EvidenceKind.LLM_EXTRACTION, EvidenceKind.SPDX_MATCH)
+    )
 
 
 def publishable_decision(record: RightsRecord | None = None) -> GateDecision:
@@ -636,6 +649,75 @@ class TestPublicationBridge:
         with pytest.raises(CategoryNotFoundError):
             await bridge.apply(candidate, decision, spec, NOW)
 
+        assert saleor.calls == []
+
+
+class TestCallerAssertionTheGateContradicts:
+    """A decision claiming publishable over a record the gate refuses.
+
+    The two paths must be distinguishable in one module: the same record
+    presented as ``publishable=False`` is an outcome the bridge acts on, while a
+    claim the gate contradicts stops the run instead of writing an entry.
+    """
+
+    async def test_it_raises_and_creates_no_entry(
+        self,
+        gate: PublicationGate,
+        bridge: PublicationBridge,
+        saleor: FakeSaleor,
+        store: InMemoryStore,
+        candidate: Candidate,
+        spec: SourceSpec,
+    ) -> None:
+        record = no_source_evidence_record()
+        assert gate.decide(spec, record).publishable is False
+
+        with pytest.raises(RightsDeniedError):
+            await bridge.apply(candidate, publishable_decision(record), spec, NOW)
+
+        assert saleor.calls == []
+        assert await store.by_candidate(candidate.id) is None
+
+    async def test_it_leaves_a_published_entry_untouched(
+        self,
+        bridge: PublicationBridge,
+        saleor: FakeSaleor,
+        store: InMemoryStore,
+        candidate: Candidate,
+        spec: SourceSpec,
+    ) -> None:
+        existing = published_entry()
+        await store.save_entry(existing)
+
+        with pytest.raises(RightsDeniedError):
+            await bridge.apply(
+                candidate, publishable_decision(no_source_evidence_record()), spec, NOW
+            )
+
+        assert await store.by_candidate(candidate.id) == existing
+        assert saleor.calls == []
+
+    async def test_the_same_record_stated_not_publishable_withdraws(
+        self,
+        gate: PublicationGate,
+        bridge: PublicationBridge,
+        saleor: FakeSaleor,
+        store: InMemoryStore,
+        candidate: Candidate,
+        spec: SourceSpec,
+    ) -> None:
+        record = no_source_evidence_record()
+        refusal = gate.decide(spec, record)
+        await store.save_entry(published_entry())
+        decision = refused_decision(reasons=refusal.reasons, record=record)
+
+        outcome = await bridge.apply(candidate, decision, spec, NOW)
+
+        assert outcome.action is PublicationAction.WITHDRAWN
+        assert outcome.reasons != ()
+        assert all(reason in outcome.reasons[0] for reason in refusal.reasons)
+        assert outcome.entry is not None
+        assert outcome.entry.state is CatalogueEntryState.WITHDRAWN
         assert saleor.calls == []
 
 

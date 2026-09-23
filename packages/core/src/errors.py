@@ -22,7 +22,7 @@ class UnknownSourceError(VelmorError):
 
 
 class RightsDeniedError(VelmorError):
-    """A good was about to be published without a passing rights verdict."""
+    """A decision claimed a good was publishable while the publication gate refused it."""
 
 
 class ProhibitedCategoryError(VelmorError):

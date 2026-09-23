@@ -21,12 +21,13 @@ from packages.core.src.bootstrap.settings_loader import SettingsLoader
 from packages.services.src.commerce.asset_cache import AssetCache
 from packages.services.src.commerce.digest import ContentDigest
 from packages.services.src.commerce.publication import PublicationBridge
-from packages.services.src.domain.gate import GateDecision
-from packages.services.src.domain.publication import PublicationAction
+from packages.services.src.domain.publication import PublicationAction, PublicationOutcome
+from packages.services.src.domain.rights import RightsRecord
 from packages.services.src.persistence.postgres import PostgresStore
 from packages.services.src.rights.license_grants import DefaultLicenseGrants
 from packages.services.src.rights.license_matrix import LicenseMatrix
 from packages.services.src.rights.publication_gate import PublicationGate
+from packages.services.src.rights.rights_resolver import RightsResolver
 from packages.services.src.saleor.client import SaleorClient
 from packages.services.src.sources.source_registry import DefaultSources, SourceRegistry
 
@@ -77,29 +78,49 @@ class PublishCommand:
                 categories=store,
                 digest=digest,
             )
-            await self._publish_all(store, bridge, limit)
+            await self._publish_all(store, bridge, gate, limit)
 
     async def _publish_all(
         self,
         store: PostgresStore,
         bridge: PublicationBridge,
+        gate: PublicationGate,
         limit: int,
     ) -> None:
         pairs = await store.published(limit)
         counts: Counter[PublicationAction] = Counter()
         now = datetime.now(UTC)
         for candidate, record in pairs:
-            decision = GateDecision(
-                candidate_id=candidate.id,
-                publishable=True,
-                reasons=(),
-                record=record,
-            )
             spec = self._registry.by_id(candidate.source_id)
+            decision = gate.decide(spec, record)
             outcome = await bridge.apply(candidate, decision, spec, now)
-            counts[outcome.action] += 1
-            self._log_outcome(candidate.id, outcome.action, outcome.reasons)
+            reported = self._with_engine_version_reason(outcome, record)
+            counts[reported.action] += 1
+            self._log_outcome(candidate.id, reported.action, reported.reasons)
         self._log_summary(len(pairs), counts)
+
+    def _with_engine_version_reason(
+        self, outcome: PublicationOutcome, record: RightsRecord
+    ) -> PublicationOutcome:
+        """Report a ruling recorded under an engine other than the running one.
+
+        The mismatch is a reason on the outcome, never a refusal: every record on
+        sale today predates the running engine, so refusing would withdraw the
+        catalogue for a divergence only a re-decision could act on. The action is
+        the one the ruling produces either way.
+        """
+        if record.engine_version == RightsResolver.ENGINE_VERSION:
+            return outcome
+        reason = (
+            f'ruling was recorded by engine {record.engine_version}; '
+            f'the running engine is {RightsResolver.ENGINE_VERSION}'
+        )
+        return PublicationOutcome(
+            candidate_id=outcome.candidate_id,
+            action=outcome.action,
+            reasons=(*outcome.reasons, reason),
+            entry=outcome.entry,
+        )
 
     def _log_outcome(
         self,

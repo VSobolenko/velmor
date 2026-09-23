@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Protocol
 
+from packages.core.src.errors import RightsDeniedError
 from packages.services.src.commerce.errors import (
     CategoryNotFoundError,
     DigestUnavailableError,
@@ -54,12 +55,15 @@ class ContentDigestPort(Protocol):
 class PublicationBridge:
     """Turn a settled gate decision into a paid catalogue entry, or withdraw one.
 
-    The bridge consults ``PublicationGate.listing_for`` and never calls
-    ``decide``: publishability is an input. It does not assign categories or
-    delete Saleor products on withdrawal. Every path that ends PUBLISHED obtains
-    a content digest first; an unobtainable digest is a publication refusal, and
-    so is a payload the platform cannot render, which also withdraws an entry
-    that already advertises a preview the shop cannot produce.
+    The bridge re-derives the gate's ruling from the decision's own record and
+    never trusts the caller's ``publishable`` flag: a caller that asserts a
+    ruling the gate does not produce is refused with ``RightsDeniedError``,
+    while a decision that states the good is not publishable is an outcome the
+    bridge handles. It does not assign categories or delete Saleor products on
+    withdrawal. Every path that ends PUBLISHED obtains a content digest first;
+    an unobtainable digest is a publication refusal, and so is a payload the
+    platform cannot render, which also withdraws an entry that already
+    advertises a preview the shop cannot produce.
     """
 
     def __init__(
@@ -84,16 +88,34 @@ class PublicationBridge:
         now: datetime,
     ) -> PublicationOutcome:
         self._require_source_match(candidate, decision, spec)
+        ruling = self._gate.decide(spec, decision.record)
         listing = self._gate.listing_for(decision.record)
         existing = await self._entries.by_candidate(candidate.id)
 
         if not decision.publishable:
             return await self._when_not_publishable(candidate, decision, existing)
 
+        self._require_gate_approval(candidate, ruling)
+
         if listing is not StorefrontListing.PAID_OK:
             return await self._when_not_paid_ok(candidate, decision, listing, existing)
 
         return await self._when_paid_ok(candidate, decision, existing, now)
+
+    def _require_gate_approval(self, candidate: Candidate, ruling: GateDecision) -> None:
+        """Refuse a caller's assertion that the gate's own ruling contradicts.
+
+        A decision that is not publishable is a normal outcome and takes the
+        ``_when_not_publishable`` path. A decision that claims publishable while
+        the gate refuses is not an outcome: the caller did not use the gate, so
+        there is no entry to write and no reason to report against.
+        """
+        if ruling.publishable:
+            return
+        raise RightsDeniedError(
+            f'{candidate.id!r} was presented as publishable but the gate refuses it: '
+            f'{"; ".join(ruling.reasons)}'
+        )
 
     def _require_source_match(
         self, candidate: Candidate, decision: GateDecision, spec: SourceSpec

@@ -33,8 +33,15 @@ surface, with real inputs.
    action the listing requires, the decision is not `PUBLISHABLE`.
 4. **Every refusal has a reason.** A non-`PUBLISHABLE` `GateDecision` with an empty
    reason list is a bug.
-5. **The gate has no bypass.** Publishing without a passing verdict raises
-   `RightsDeniedError`. There is no second path and no "already approved" shortcut.
+5. **The gate has no bypass.** `PublicationBridge.apply` re-derives the gate's ruling
+   from the decision's own record and raises `RightsDeniedError` when a caller presents a
+   decision claiming the record is publishable while the gate refuses. No entry is created
+   for it and an entry already present is left untouched. Observe this by running the case
+   that asserts the raise - `TestCallerAssertionTheGateContradicts` in
+   `packages/services/tests/unit/commerce/test_publication.py` - never by reading the code.
+   A decision that states the record is *not* publishable is an outcome, not an error: the
+   bridge withdraws or reports, carrying the gate's reasons. There is no second path and no
+   "already approved" shortcut.
 6. **Determinism.** The same `(candidate, grant, evidence)` produces an identical
    verdict twice in a row, and the verdict path touches no clock, network, model or
    filesystem. Verify by freezing and re-running, not by reading the code.
