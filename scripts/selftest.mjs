@@ -1,4 +1,4 @@
-﻿#!/usr/bin/env node
+#!/usr/bin/env node
 /**
  * selftest: does the harness honour its own contracts?
  *
@@ -77,6 +77,25 @@ function runScript(relativePath, args, options = {}) {
     timeout: 120_000,
     windowsHide: true,
     env: { ...process.env, ...(options.env || {}) }
+  })
+}
+
+/**
+ * Run a Python snippet through the project environment.
+ *
+ * Only the publication-guard check below needs this. It is a snippet rather than a file
+ * because a fixture committed under `packages/` becomes product code: it would be gated
+ * by the hooks, counted by the suite and reviewed as behaviour, when what it is is a
+ * probe of one refusal. `python -` reads the program from stdin and puts the working
+ * directory on `sys.path`, so `packages` and `velmor` resolve without a wrapper.
+ */
+function runPython(source) {
+  return spawnSync('uv', ['run', 'python', '-'], {
+    cwd: ROOT,
+    input: source,
+    encoding: 'utf8',
+    timeout: 120_000,
+    windowsHide: true
   })
 }
 
@@ -245,6 +264,120 @@ const ordinaryEdit = runHook('policy-guard.cjs', {
   tool_input: { path: 'packages/services/src/domain/candidate.py', contents: 'x = 1\n' }
 })
 check('allows an ordinary edit', permission(ordinaryEdit) === 'allow', permission(ordinaryEdit))
+
+// The checks above send a repository-relative `path`. The runtime sends an **absolute**
+// `file_path` - measured as `d:\Python\Velmor\packages\...` - so on its own the block above
+// certifies a payload the runtime never sends, which is how this hook went inert in
+// production while the suite stayed green. Both directions are asserted here: the policy
+// surface must be caught at an absolute path, and an ordinary file must still be allowed so
+// the resolution cannot turn into a blanket ask.
+const urlLikeRoot = '/' + ROOT.replace(/\\/g, '/')
+
+const absoluteGateEdit = runHook('policy-guard.cjs', {
+  tool_name: 'Write',
+  tool_input: {
+    file_path: join(ROOT, 'packages', 'services', 'src', 'rights', 'publication_gate.py'),
+    contents: 'x = 1\n'
+  },
+  workspace_roots: [urlLikeRoot]
+})
+check(
+  'asks before an edit to the publication gate - the absolute path the runtime sends',
+  permission(absoluteGateEdit) === 'ask',
+  permission(absoluteGateEdit)
+)
+
+const absoluteRuleEdit = runHook('policy-guard.cjs', {
+  tool_name: 'Write',
+  tool_input: { file_path: join(ROOT, '.cursor', 'rules', '06-rights-engine.mdc'), contents: 'x\n' },
+  workspace_roots: [urlLikeRoot]
+})
+check(
+  'asks before an edit to a rule - the absolute path the runtime sends',
+  permission(absoluteRuleEdit) === 'ask',
+  permission(absoluteRuleEdit)
+)
+
+const absoluteOrdinaryEdit = runHook('policy-guard.cjs', {
+  tool_name: 'Write',
+  tool_input: {
+    file_path: join(ROOT, 'packages', 'services', 'src', 'domain', 'candidate.py'),
+    contents: 'x = 1\n'
+  },
+  workspace_roots: [urlLikeRoot]
+})
+check(
+  'allows an ordinary edit at an absolute path',
+  permission(absoluteOrdinaryEdit) === 'allow',
+  permission(absoluteOrdinaryEdit)
+)
+
+// ---------------------------------------------------------------------------
+// ui-guard: buyer-visible copy and a chosen language must not live in a component.
+//
+// This hook had no check at all until now, so nothing ever observed whether it fires. Its
+// payload is the same absolute-path shape as the two guards above, and the literal below is
+// the exact defect it exists to catch: a Cyrillic string written into a component instead of
+// into `storefront/src/lib/i18n/*.json`.
+// ---------------------------------------------------------------------------
+
+section('ui-guard')
+
+const cyrillicComponent = runHook('ui-guard.cjs', {
+  tool_name: 'Write',
+  tool_input: {
+    file_path: join(ROOT, 'storefront', 'src', 'app', 'page.tsx'),
+    contents: 'export default () => <button>Добавить в корзину</button>\n'
+  },
+  workspace_roots: [urlLikeRoot]
+})
+check(
+  'denies Cyrillic copy in a component - the absolute path the runtime sends',
+  permission(cyrillicComponent) === 'deny',
+  permission(cyrillicComponent)
+)
+
+const hardcodedLanguage = runHook('ui-guard.cjs', {
+  tool_name: 'Write',
+  tool_input: {
+    file_path: join(ROOT, 'storefront', 'src', 'app', 'layout.tsx'),
+    contents: 'export default () => <html lang="be"><body /></html>\n'
+  },
+  workspace_roots: [urlLikeRoot]
+})
+check(
+  'denies a literal language in lang=',
+  permission(hardcodedLanguage) === 'deny',
+  permission(hardcodedLanguage)
+)
+
+const cleanComponent = runHook('ui-guard.cjs', {
+  tool_name: 'Write',
+  tool_input: {
+    file_path: join(ROOT, 'storefront', 'src', 'app', 'page.tsx'),
+    contents: 'export default () => <button>{t("addToCart")}</button>\n'
+  },
+  workspace_roots: [urlLikeRoot]
+})
+check(
+  'allows a component that reads its copy from the dictionary',
+  permission(cleanComponent) === 'allow',
+  permission(cleanComponent)
+)
+
+const localeDictionary = runHook('ui-guard.cjs', {
+  tool_name: 'Write',
+  tool_input: {
+    file_path: join(ROOT, 'storefront', 'src', 'lib', 'i18n', 'ru.json'),
+    contents: '{ "addToCart": "Добавить в корзину" }\n'
+  },
+  workspace_roots: [urlLikeRoot]
+})
+check(
+  'allows the locale dictionary, which is the sanctioned home for copy',
+  permission(localeDictionary) === 'allow',
+  permission(localeDictionary)
+)
 
 // ---------------------------------------------------------------------------
 // destructive-guard: irreversible commands, and nothing else.
@@ -519,6 +652,88 @@ for (const [text, expected] of [
 }
 
 // ---------------------------------------------------------------------------
+// codex-run ledger: a killed worker must not be reported as `running`.
+//
+// A worker killed by an operator, a closed terminal or a machine restart never writes an exit
+// record, so `status` fell back to the launch-time word `running` and kept saying it. Measured:
+// two workers still read `running` after 155 and 140 minutes while `process.kill(pid, 0)` said
+// the pids were gone. A reader deciding whether to wait or to re-dispatch waits forever on that
+// word, so the false reading is worse than a failure would have been.
+//
+// The injection is the defect itself: a ledger entry carrying a pid no live process can hold,
+// and no exit record. It must read LOST, and it must not read `running`.
+// ---------------------------------------------------------------------------
+
+section('codex-run ledger liveness')
+
+const lostFixture = join(ROOT, '.velmor', 'codex', 'selftest-lost-worker.meta.json')
+mkdirSync(dirname(lostFixture), { recursive: true })
+// A pid beyond the addressable range, so the probe is deterministic rather than a race. A real
+// short-lived child could be reused by the OS between spawning it and asking about it, which
+// would make this check flaky in the one direction that matters.
+writeFileSync(
+  lostFixture,
+  JSON.stringify({
+    id: 'selftest-lost-worker',
+    kind: 'run',
+    label: 'selftest fixture',
+    status: 'running',
+    pid: 2147483000,
+    startedAt: '2020-01-01T00:00:00.000Z'
+  })
+)
+scratch.push(lostFixture)
+
+const lostStatus = runScript('scripts/codex-run.mjs', ['status', '--id', 'selftest-lost-worker'])
+const lostLine = output(lostStatus).trim().split('\n').slice(-1)[0]
+check(
+  'a worker whose process is gone is reported LOST, never running',
+  lostLine.startsWith('LOST') && !lostLine.includes('running'),
+  lostLine || '(no output)'
+)
+
+// ---------------------------------------------------------------------------
+// Harness scripts must be parseable.
+//
+// `scripts/selftest.mjs` carried a UTF-8 BOM, which `node --check` rejects at the shebang
+// (`SyntaxError: Invalid or unexpected token` on line 1) while `node <file>` runs the same file
+// happily. The one script whose job is proving that the harness's own sensors work therefore could
+// not itself be syntax-checked, and no gate noticed. A BOM is invisible in every editor and in
+// every diff, which is why this is a sensor and not a note.
+// ---------------------------------------------------------------------------
+
+section('harness scripts are parseable')
+
+const BOM_BYTES = [0xef, 0xbb, 0xbf]
+const scriptsWithBom = []
+
+function scanForBom(directory) {
+  for (const entry of readdirSync(directory, { withFileTypes: true })) {
+    if (entry.name === 'node_modules') continue
+    const full = join(directory, entry.name)
+    if (entry.isDirectory()) {
+      scanForBom(full)
+      continue
+    }
+    if (!/\.(mjs|cjs|js)$/.test(entry.name)) continue
+    const head = readFileSync(full).subarray(0, 3)
+    if (head[0] === BOM_BYTES[0] && head[1] === BOM_BYTES[1] && head[2] === BOM_BYTES[2]) {
+      scriptsWithBom.push(full.slice(ROOT.length + 1).replace(/\\/g, '/'))
+    }
+  }
+}
+
+for (const directory of [join(ROOT, 'scripts'), join(ROOT, '.cursor', 'hooks')]) {
+  scanForBom(directory)
+}
+
+check(
+  'no harness script carries a UTF-8 BOM (it makes `node --check` reject the shebang)',
+  scriptsWithBom.length === 0,
+  scriptsWithBom.join(', ')
+)
+
+// ---------------------------------------------------------------------------
 // codex-gate: the Codex-first requirement, which had no enforcement at all until now.
 //
 // The requirement is that product code is written by a Codex worker. Both directions matter:
@@ -578,6 +793,27 @@ check(
   permission(gate(productWrite('packages/core/src/x.py'), { VELMOR_CODEX_GATE: 'off' })) === 'allow'
 )
 
+// The payload the runtime actually sends for a write carries an **absolute** path. Measured on
+// this machine: `tool_input.file_path` = `d:\Python\Velmor\packages\...`, not `packages/...`.
+// Every check above sends the relative form, which is the form the gate used to match - so the
+// suite certified a payload the runtime never sends, and the gate allowed every real product
+// write before it read the worker ledger. Both directions are asserted: the absolute
+// in-workspace path must be judged exactly like the relative one, and an absolute path outside
+// the workspace must not be pulled into the gated roots by the resolution itself.
+const absoluteWrite = (filePath) => ({ tool_name: 'Write', tool_input: { file_path: filePath } })
+const absoluteProduct = join(gateRoot, 'packages', 'core', 'src', 'x.py')
+
+check(
+  'denies an absolute path to product code - the payload the runtime sends',
+  permission(gate(absoluteWrite(absoluteProduct))) === 'deny',
+  permission(gate(absoluteWrite(absoluteProduct)))
+)
+check(
+  'allows an absolute path outside the workspace',
+  permission(gate(absoluteWrite(join(sandbox(), 'packages', 'core', 'src', 'x.py')))) === 'allow',
+  permission(gate(absoluteWrite(join(sandbox(), 'packages', 'core', 'src', 'x.py'))))
+)
+
 // The allow half: a worker recorded in the ledger must satisfy the gate. Without this the
 // check above would pass for a hook that denies unconditionally.
 const gateLedger = sandbox()
@@ -619,6 +855,53 @@ check(
   permission(staleWorker)
 )
 
+// A record with no exit file is treated as a worker that is still running. That is right for a
+// worker started a moment ago, and it is what makes the gate usable. It becomes wrong across a
+// session boundary: killing a runner (an operator's `Stop-Process`, a killed background job)
+// writes no exit record, so a worker from a *previous* session stayed `running` forever, and
+// `running` bypassed the session window that exists precisely to stop "Codex ran once, ever".
+// Measured on this repository: two killed Codex reviews left exactly that state. The record's own
+// `pid` is the evidence, and the worker below is deliberately dated before the session so the
+// liveness clause is what decides, not the window.
+const killedPid = spawnSync(process.execPath, ['-e', '0']).pid
+const yesterday = new Date(Date.now() - 86_400_000).toISOString()
+
+const killedRoot = sandbox()
+write(killedRoot, '.velmor/session/epoch', `${new Date().toISOString()}\n`)
+write(
+  killedRoot,
+  '.velmor/codex/killed.meta.json',
+  `${JSON.stringify({ id: 'killed', startedAt: yesterday, pid: killedPid })}\n`
+)
+const killedWorker = runHook(
+  'codex-gate.cjs',
+  { tool_name: 'Write', workspace_roots: [killedRoot], tool_input: { path: 'packages/core/src/x.py' } },
+  { VELMOR_CODEX_WINDOW_MIN: '1' }
+)
+check(
+  'denies a worker from a previous session that was killed, not merely a stale timestamp',
+  permission(killedWorker) === 'deny',
+  permission(killedWorker)
+)
+
+const liveRoot = sandbox()
+write(liveRoot, '.velmor/session/epoch', `${new Date().toISOString()}\n`)
+write(
+  liveRoot,
+  '.velmor/codex/live.meta.json',
+  `${JSON.stringify({ id: 'live', startedAt: yesterday, pid: process.pid })}\n`
+)
+const liveWorker = runHook(
+  'codex-gate.cjs',
+  { tool_name: 'Write', workspace_roots: [liveRoot], tool_input: { path: 'packages/core/src/x.py' } },
+  { VELMOR_CODEX_WINDOW_MIN: '1' }
+)
+check(
+  'allows a worker that is still running, however long it has run',
+  permission(liveWorker) === 'allow',
+  permission(liveWorker)
+)
+
 // ---------------------------------------------------------------------------
 // The MCP launcher.
 // ---------------------------------------------------------------------------
@@ -646,6 +929,79 @@ for (const [name, server] of Object.entries(config.mcpServers || {})) {
   }
 }
 check('every run-mcp alias in mcp.json exists in the alias table', aliasMismatch === 0)
+
+// ---------------------------------------------------------------------------
+// The publication guard: the bridge must not trust a caller's assertion.
+//
+// `.cursor/commands/rights-verify.md` invariant 5 says the bridge raises `RightsDeniedError`
+// for a caller presenting a decision the gate contradicts. Nothing observed that until now,
+// and this is the check that does: it applies the real bridge to a decision asserting
+// `publishable` over a record the gate refuses - a model reading plus the identity match
+// derived from it, which is the cheapest record the gate turns away.
+//
+// The probe deliberately lets the error propagate. The `print` after `apply` is the failure
+// path, so a nonzero exit whose traceback names `RightsDeniedError` is the passing case, and
+// nothing catches the error to observe it: this change adds a raise, not a catch. The fixture
+// is assembled here rather than committed under `packages/`, where it would be product code
+// subject to the hooks and to a different suite; the guard's own regression case lives in
+// `test_publication.py`.
+// ---------------------------------------------------------------------------
+
+section('publication guard')
+
+const guardProbe = runPython(`
+import asyncio
+from datetime import UTC, datetime
+
+from packages.services.src.commerce.publication import PublicationBridge
+from packages.services.src.domain.gate import GateDecision
+from packages.services.src.domain.rights import EvidenceKind
+from packages.services.src.rights.license_grants import DefaultLicenseGrants
+from packages.services.src.rights.license_matrix import LicenseMatrix
+from packages.services.src.rights.publication_gate import PublicationGate
+from packages.services.tests.conftest import build_candidate, build_record, build_spec
+
+
+class EmptyCatalogue:
+    """The store port. A record the gate refuses must never reach it."""
+
+    async def by_candidate(self, candidate_id):
+        return None
+
+
+gate = PublicationGate(LicenseMatrix(DefaultLicenseGrants.TABLE))
+spec = build_spec()
+candidate = build_candidate()
+# No download URL, so the refuse path is the only one left past the decision: neither run
+# reaches the digest, Saleor or category port, which is why they are None below and why a
+# bridge that accepts the decision ends in a printed line rather than a traceback.
+candidate.download_url = None
+record = build_record(evidence_kinds=(EvidenceKind.LLM_EXTRACTION, EvidenceKind.SPDX_MATCH))
+assert gate.decide(spec, record).publishable is False, 'the fixture record must be refused'
+
+decision = GateDecision(
+    candidate_id=candidate.id, publishable=True, reasons=(), record=record
+)
+bridge = PublicationBridge(
+    gate=gate, saleor=None, entries=EmptyCatalogue(), categories=None, digest=None
+)
+asyncio.run(bridge.apply(candidate, decision, spec, datetime(2026, 9, 23, tzinfo=UTC)))
+
+print('NOT RAISED: the bridge accepted a decision the gate refuses')
+raise SystemExit(1)
+`)
+
+const guardOutput = output(guardProbe)
+const guardEvidence =
+  guardOutput
+    .split(/\r?\n/)
+    .filter((line) => line.includes('RightsDeniedError') || line.includes('NOT RAISED'))
+    .slice(-1)[0] || '(no verdict in the probe output)'
+check(
+  'the bridge raises RightsDeniedError for a decision the gate refuses',
+  guardEvidence.includes('RightsDeniedError'),
+  guardEvidence.trim()
+)
 
 // ---------------------------------------------------------------------------
 // The status sensor, driven against an injected defect.
@@ -710,6 +1066,33 @@ check(
   'names an MCP alias that does not resolve',
   driftedOutput.includes('alias "no-such-alias" resolves in .cursor/mcp/mcp-aliases.cjs'),
   'expected an alias FAIL'
+)
+
+// The alias table has to come from the tree being inspected. A static import read this
+// checkout's table, so a target whose own table was missing an alias passed whenever this
+// checkout happened to have it: the check compared the target's mcp.json against the wrong
+// file. `context7` exists here and the injected tree's table is empty, so it must fail there.
+const aliasDrift = sandbox()
+write(
+  aliasDrift,
+  '.cursor/mcp.json',
+  `${JSON.stringify(
+    {
+      mcpServers: {
+        context7: { command: 'node', args: ['${workspaceFolder}/.cursor/mcp/run-mcp.cjs', 'context7'] }
+      }
+    },
+    null,
+    2
+  )}\n`
+)
+write(aliasDrift, '.cursor/mcp/mcp-aliases.cjs', 'module.exports = Object.freeze({})\n')
+const aliasDriftRun = runScript('scripts/harness-status.mjs', ['--root', aliasDrift])
+const aliasDriftOutput = output(aliasDriftRun)
+check(
+  'reads the alias table from the inspected tree, not from this checkout',
+  /FAIL\s+context7: alias "context7"/.test(aliasDriftOutput),
+  aliasDriftOutput.split(/\r?\n/).find((line) => line.includes('context7: alias')) || '(no alias line)'
 )
 check(
   'names a hook script that does not exist',

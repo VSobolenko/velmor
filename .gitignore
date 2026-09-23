@@ -13,6 +13,9 @@ google-service-account.json
 # Agent scratch state
 .superpowers/
 .worktrees/
+# Codex worker ledger (meta, log, err, last message, prompts) and the edit ledger.
+# Orchestration state, not source; durable rulings belong in OpenSpec or harness/.
+.velmor/
 
 # Local data and artifacts
 data/

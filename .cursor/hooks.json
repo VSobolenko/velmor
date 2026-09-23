@@ -1,12 +1,25 @@
 {
   "version": 1,
   "hooks": {
+    "sessionStart": [
+      {
+        "command": "node .cursor/hooks/session-start.cjs",
+        "timeout": 10,
+        "failClosed": false
+      }
+    ],
     "preToolUse": [
       {
         "command": "node .cursor/hooks/secret-guard.cjs",
         "matcher": "^(Write|StrReplace|EditNotebook)$",
         "timeout": 10,
         "failClosed": true
+      },
+      {
+        "command": "node .cursor/hooks/codex-gate.cjs",
+        "matcher": "^(Write|StrReplace|EditNotebook)$",
+        "timeout": 10,
+        "failClosed": false
       },
       {
         "command": "node .cursor/hooks/ui-guard.cjs",
@@ -28,6 +41,13 @@
         "failClosed": false
       }
     ],
+    "beforeMCPExecution": [
+      {
+        "command": "node .cursor/hooks/mcp-audit.cjs",
+        "timeout": 10,
+        "failClosed": true
+      }
+    ],
     "postToolUse": [
       {
         "command": "node .cursor/hooks/lint-feedback.cjs",
@@ -40,6 +60,21 @@
         "matcher": "^(Write|StrReplace)$",
         "timeout": 30,
         "failClosed": false
+      }
+    ],
+    "afterFileEdit": [
+      {
+        "command": "node .cursor/hooks/after-file-edit.cjs",
+        "timeout": 10,
+        "failClosed": false
+      }
+    ],
+    "stop": [
+      {
+        "command": "node .cursor/hooks/stop-gate.cjs",
+        "timeout": 10,
+        "failClosed": false,
+        "loop_limit": 1
       }
     ]
   }

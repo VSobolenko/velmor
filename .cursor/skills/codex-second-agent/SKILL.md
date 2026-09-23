@@ -1,4 +1,4 @@
----
+﻿---
 name: codex-second-agent
 description: Delegate work to Codex (a GPT-based agent) as an independent second agent - review, implementation, research, image generation - through the `codex` MCP tools or the `codex` CLI. Use when you need genuine model diversity, a second opinion, or to offload a large independent investigation.
 disable-model-invocation: true
@@ -9,6 +9,20 @@ disable-model-invocation: true
 Codex is a full agent harness (its own loop, tools, sandbox, context window) running
 OpenAI models. In this repo it is wired up as an MCP server, so it can be dispatched to
 like any other tool.
+
+## Pick the transport first
+
+This is the mistake that costs work, so decide it before writing the prompt:
+
+| Transport | Use for | Why |
+|-----------|---------|-----|
+| `codex` MCP tool, `codex-reply` | Short dialogue, one independent review, image generation | An MCP request has a timeout |
+| `node scripts/codex-run.mjs` | Implementation or verification that runs for minutes | Durable ledger, resumable, survives the timeout |
+
+A long task sent through the MCP tool dies mid-flight and is lost. Use the runner for
+anything that is not a single short exchange. Operator detail, including the prompt
+contract and the classified failures: `harness/codex-workers.md`. Role cards and the
+fallback ladder: `harness/dual-agent.md`.
 
 ## Why use it at all
 
@@ -310,18 +324,36 @@ reference project on this machine:
 Do not fan out many Codex calls in a loop. Batch the work into one well-specified prompt,
 or use it where its independence actually buys something.
 
-## CLI fallback
+## CLI: the durable runner, and the raw fallback
 
-If the MCP server is unavailable, drive the same agent through the shell. The binary lives
-inside a versioned editor extension, so it is usually **not** on `PATH`. Resolve it
-through the launcher:
+**Preferred for anything that is not a single short exchange:**
+
+```bash
+node scripts/codex-run.mjs run --id <id> --prompt-file harness/codex/prompts/<prompt>.md \
+  --sandbox workspace-write --effort high --label 'One line of context'
+
+node scripts/codex-run.mjs review --id <id> --uncommitted   # independent review, no prompt file
+node scripts/codex-run.mjs status                           # DONE | FAILED(n) | BLOCKED(signal)
+node scripts/codex-run.mjs last  --id <id> --chars 4000
+node scripts/codex-run.mjs resume --id <id> --prompt-file harness/codex/prompts/<follow-up>.md
+```
+
+It writes `.velmor/codex/<id>.{meta.json,log,err,last.md,exit.json}`, streams output to disk
+as it runs, and resumes the exact recorded session id. It refuses `--sandbox
+danger-full-access` outright. Flags and the prompt contract: `harness/codex-workers.md`.
+
+**Raw launcher**, when the MCP server is unavailable and the task is short enough to stay in
+one process. The binary lives inside a versioned editor extension, so it is usually **not**
+on `PATH`; resolve it through the launcher:
 
 ```bash
 node .cursor/mcp/codex-launcher.cjs exec -s read-only -C "<dir>" "<prompt>"
 ```
 
 Useful flags: `-s/--sandbox`, `-C/--cd`, `-m/--model`, `--json` (JSONL events),
-`-o/--output-last-message <file>`, `-i/--image <file>`, `--skip-git-repo-check`.
+`-o/--output-last-message <file>`, `-i/--image <file>`, `--skip-git-repo-check`. Note that
+`exec resume` accepts neither `-s` nor `-C`: a resumed turn inherits the sandbox and root
+recorded when the session started.
 
 ## Setup in this repo
 

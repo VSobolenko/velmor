@@ -57,20 +57,14 @@ const MATCHING_CALL =
 // A character class or a codepoint escape naming a script is likewise a pattern.
 const SCRIPT_PATTERN = /\\p\{Script=[A-Za-z]+\}/g
 
+const hookIo = require('./lib/hook-io.cjs')
+
 function readInput() {
-  try {
-    return fs.readFileSync(0, 'utf8')
-  } catch (error) {
-    return ''
-  }
+  return hookIo.readStdin()
 }
 
 function targetPath(toolInput) {
   return toolInput.path || toolInput.file_path || toolInput.filePath || toolInput.target_file || ''
-}
-
-function normalise(filePath) {
-  return String(filePath).replace(/\\/g, '/').replace(/^\.\//, '')
 }
 
 // The storesfront's own sources, excluding anything that is not a component or a
@@ -180,7 +174,10 @@ function main() {
   }
 
   const toolInput = payload.tool_input || payload.toolInput || {}
-  const candidate = normalise(targetPath(toolInput))
+  // Resolved against the workspace root: the runtime sends an absolute `file_path`, while
+  // `isGuardedSource` matches `storefront/src/...`. See `workspaceRelative` in `lib/hook-io.cjs`
+  // for why comparing the two forms directly left this hook inert for every real write.
+  const candidate = hookIo.workspaceRelative(targetPath(toolInput), hookIo.workspaceRoot(payload))
   if (!isGuardedSource(candidate)) {
     allow()
     return

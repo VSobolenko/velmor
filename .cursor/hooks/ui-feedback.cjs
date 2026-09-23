@@ -20,12 +20,10 @@ const path = require('path')
 const TIMEOUT_MS = 20000
 const CHECK_SCRIPT = 'storefront/scripts/check-i18n.mjs'
 
+const hookIo = require('./lib/hook-io.cjs')
+
 function readInput() {
-  try {
-    return fs.readFileSync(0, 'utf8')
-  } catch (error) {
-    return ''
-  }
+  return hookIo.readStdin()
 }
 
 function targetPath(toolInput) {

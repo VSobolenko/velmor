@@ -1,0 +1,20 @@
+{
+  "name": "velmor-harness",
+  "private": true,
+  "type": "module",
+  "description": "Velmor agent harness: MCP launchers, health sensors and the Codex worker channel. The product is Python; this manifest exists only so the harness scripts have one entry point.",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "harness:status": "node scripts/harness-status.mjs",
+    "harness:mcp": "node scripts/setup-mcp.mjs",
+    "harness:selftest": "node scripts/selftest.mjs",
+    "harness:check": "node scripts/harness-status.mjs && node scripts/selftest.mjs && node scripts/setup-mcp.mjs",
+    "agents:sync": "node scripts/sync-agents.mjs",
+    "agents:check": "node scripts/sync-agents.mjs --check",
+    "codex:run": "node scripts/codex-run.mjs run",
+    "codex:review": "node scripts/codex-run.mjs review",
+    "codex:status": "node scripts/codex-run.mjs status"
+  }
+}

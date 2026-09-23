@@ -16,7 +16,7 @@ when a command fails, or before touching docker/env/CI.
 | Python | 3.13 | `requires-python = ">=3.13,<3.14"` |
 | uv | current | workspace, dependency resolution, running everything |
 | Docker | current | local Postgres + Redis |
-| Node | 18+ | only for the harness hooks (`node .cursor/hooks/*.cjs`) and `scripts/setup-mcp.mjs`; `storefront/` has its own toolchain |
+| Node | 20+ | the agent harness: hooks, `scripts/*.mjs`, and `storefront/` has its own toolchain |
 
 Python only in the product. Node exists for the agent harness and for
 `storefront/`, the scoped Node exception: a presentation layer with no rights
@@ -102,10 +102,17 @@ Type checking (`basedpyright`, `mypy`) is configured but is **not** a gate yet.
 ## Harness tooling
 
 ```bash
-node scripts/setup-mcp.mjs      # verify every npx/uvx MCP server resolves
-openspec list                   # OpenSpec changes
+node scripts/harness-status.mjs  # is the harness complete and consistent on this machine
+node scripts/selftest.mjs        # do the harness scripts honour their own contracts
+node scripts/setup-mcp.mjs       # what each MCP alias resolves to, and what needs a value
+node scripts/codex-run.mjs list  # durable Codex workers and their state
+openspec list                    # OpenSpec changes
 openspec validate --strict "<change>"
 ```
+
+`harness-status.mjs` reports `PASS` / `WARN` / `INFO` / `FAIL` and exits non-zero on a
+`FAIL`. A `WARN` is a machine-level gap (no Docker, no Codex CLI), not a repository defect.
+The detail behind every surface is in `harness/`.
 
 ## OpenSpec workflow
 
@@ -122,8 +129,13 @@ openspec validate --strict "<change>"
 | Command | Purpose |
 |---------|---------|
 | `/ship <task>` | End-to-end autonomous run with two human checkpoints |
+| `/eval` | Independent Evaluator grading against a fixed rubric |
 | `/review` | Dispatch `bugbot` + `security-review` as a merge gate |
 | `/rights-verify` | Prove the publication gate still refuses what it must |
+| `/ux-verify` | Drive the running shop; screenshots are the evidence |
+| `/harness-status` | Is the harness complete and consistent on this machine |
+| `/diagnose` | Root cause of a harness, tooling or agent failure |
+| `/improve-harness` | Turn a repeated failure into a rule, hook or sensor |
 
 ## Troubleshooting
 

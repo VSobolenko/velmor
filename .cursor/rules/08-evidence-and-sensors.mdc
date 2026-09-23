@@ -1,0 +1,80 @@
+---
+description: Evidence discipline, sensors and single-source-of-truth rules for the harness
+alwaysApply: true
+---
+
+# Evidence and sensors
+
+This repository shipped a complete commerce layer whose buyer surface was a list of
+source filenames, and every test, lint and review passed. Nothing was lying; no gate
+was looking. The rules below exist so that the harness improves after a defect instead
+of after the same defect a second time.
+
+## Never claim something works until it ran
+
+- Writing a script is half the job. Run it on real input and quote the output.
+- "The code looks correct" is not evidence. `node scripts/harness-status.mjs`,
+  `node scripts/selftest.mjs`, `uv run python -m pytest packages velmor -q` and a
+  screenshot are evidence.
+- If a check could not be run, say that it is unverified. Unverified and passing are
+  different states and must be reported differently.
+- A component that has never executed is unverified, however complete it looks. The Codex
+  worker runner was written, documented and reviewed and had never started a worker; behind
+  that were a documented prompt workflow that could not be executed, a resume that escalated
+  a read-only worker to write access, and a classifier that reported a successful run as an
+  authentication failure. A diff shows none of them. Run the thing once, on real input, and
+  record the output before you describe it as working.
+
+## A sensor that cannot fail is not a sensor
+
+- Before trusting a new check, prove it can fail: inject the defect it is meant to
+  catch, confirm it reports FAIL, remove the defect, confirm it reports PASS. Record
+  both runs.
+- Add the injected-defect check to `scripts/selftest.mjs` so the sensor keeps being
+  tested after the next change to it.
+- Prefer a computational sensor over prose. A rule that only says "be careful" is
+  advice; a check that fails the build is a constraint.
+
+## One source of truth, imported
+
+- A value used in two places lives in one module and is imported by both. The MCP
+  alias table lives in `.cursor/mcp/mcp-aliases.cjs` and is read by the launcher and by
+  both sensors; a package name is therefore written once.
+- A sensor reads that source of truth by **importing** it, never by searching its text. A
+  grep for `<alias>:` misses a quoted key and accepts a name that appears in a comment; both
+  have already happened here, and the second would have been "fixed" by weakening the check.
+- A pattern must be as specific as the claim it makes. A bare `401` matched the ruff rule
+  code `F401` inside a file a worker had merely read, and reported a completed run as an
+  authentication failure. A false positive is worse than a miss: a miss falls through to a
+  bounded retry, while a false positive discards work that succeeded.
+- Never hand-write a message that restates a rule. Build it from the check itself, so
+  the wording cannot drift away from the logic.
+- When a shared constant changes, sweep the repository for every textual form (plain,
+  regex-escaped, string-escaped, path form) and prove zero leftovers.
+
+## Hooks are enforcement, not documentation
+
+- A constraint that can be decided mechanically belongs in a hook, not only in a rule
+  file: `.cursor/hooks/` is the part of a rule a machine can enforce.
+- Do not work around a hook. A denial is the gate working. If a hook is wrong, say so
+  and ask the human to change it, and change the rule it enforces in the same edit.
+- A hook runs on a path where a crash must not decide the outcome. State the intended
+  failure mode (`failClosed` or explicit allow) in the hook's header and make the code
+  match it.
+
+## Text rewriting and recursive copies
+
+- Any recursive copy over the tree must exclude build output, virtual environments,
+  caches and machine-local files. List the source directory before writing the copy
+  step; never assume what a directory contains.
+- Any search-and-replace pass must skip binary files (those containing NUL bytes) and
+  match whole tokens. A rewrite that fires inside a binary corrupts it invisibly.
+
+## Every repeated defect earns a regression check and a lesson
+
+- When a defect is fixed, add a check that fails on the old behaviour.
+- Record it in `harness/lessons.md` (symptom, root cause, fix class, change made). That
+  file is append-only and is read at session start, so an entry is how the harness
+  remembers.
+- `/improve-harness` is the procedure. `/diagnose` is for a failure whose cause is not
+  yet known.

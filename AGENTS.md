@@ -291,6 +291,79 @@ Scaffolded or not yet implemented - do not assume these work:
 
 ## AI tooling
 
+The surfaces below are documented in one place, with the reason each exists and the
+behaviour it relies on: `harness/README.md` (the canonical loop and every command),
+`harness/cursor-surface.md` (which Cursor surface does what), `harness/ambition.md`
+(what "better" means here), `harness/dual-agent.md` (Cursor and Codex as peers),
+`harness/codex-workers.md` (the durable worker contract) and `harness/lessons.md`
+(append-only memory of defects that already happened once).
+
+Four rules hold the whole thing together:
+
+1. **Codex implements; Cursor verifies.** Product code is written by a Codex worker, not by
+   the orchestrator. Cursor implements only after a classified Codex failure or two failed
+   attempts, and says so when that happens. `.cursor/hooks/codex-gate.cjs` refuses a
+   product-code write with no worker behind it. Details below.
+2. **A grader is never the author.** `/eval` and `/review` run in a fresh context and
+   can fail the work. `bugbot`, `security-review` and a read-only Codex worker are
+   independent readers; a suite the author wrote is not.
+3. **A peer's self-report is not evidence.** Codex returning `DONE`, or a subagent
+   saying "tests pass", is a claim. Read the diff, run the gate, quote the output.
+4. **A sensor that cannot fail is not a sensor.** Before trusting a check, inject the
+   defect and watch it report. `scripts/selftest.mjs` exists to prove the harness's own
+   sensors, hooks and refusals behave as documented.
+
+```
+node scripts/harness-status.mjs   # is the harness complete and consistent here
+node scripts/selftest.mjs         # do the harness scripts honour their own contracts
+node scripts/setup-mcp.mjs        # what each MCP alias resolves to on this machine
+```
+
+`AGENTS.md` is the one channel that reaches every agent runtime for free, including
+Codex, which does not read `.cursor/rules/`. A constraint that must bind Codex too
+belongs in this file.
+
+### Codex first: who implements
+
+The default owner of any change under `packages/`, `velmor/` or `storefront/` is a **Codex
+worker**. This is not a preference for model diversity; it is the structure that makes Cursor
+able to verify at all. An agent that writes the code and then grades it has one set of blinds
+spots, and every "independent" check it runs shares them.
+
+The ladder is fixed. Move down it only when the rung above is provably blocked:
+
+1. **Codex worker** — `node scripts/codex-run.mjs run --id <id> --prompt-file
+   harness/codex/prompts/<prompt>.md --sandbox workspace-write`. Prompts start from
+   `harness/codex/prompts/build-task.md`.
+2. **Cursor implementer subagent** — only on a classified `RATE_LIMITED`, `CONTEXT_LIMIT` or
+   `AUTH_ERROR`, or after the same failure twice. State the signal and the worker id in the
+   handoff.
+3. **The orchestrator directly** — only when rung 2 is also blocked. This is the last resort,
+   and it must be reported as such: "implemented by the orchestrator because <reason>".
+
+Never delegated to Codex, at any rung:
+
+- `packages/services/src/rights/**` and `packages/services/src/screening/**`. The verdict path
+  must stay a pure function of its inputs; handing it to a model-run agent is a rights-contract
+  violation, and `policy-guard.cjs` requires a human to approve an edit there anyway.
+- The harness itself: `.cursor/**`, `harness/**`, `scripts/**`, `AGENTS.md`. An agent that
+  can hand its own constraints to another agent can relax them. Rules are Cursor's work.
+- OpenSpec artifacts: proposals, specs, tasks. The contract is not implementation.
+
+Enforcement and its limits:
+
+- `codex-gate.cjs` blocks a product-code write with no Codex worker in this session. It reads
+  the worker ledger `.velmor/codex/*.meta.json`, so the evidence is that a session was started
+  and recorded, not that someone claimed one was.
+- `VELMOR_CODEX_GATE=off` in the environment disables it for one session. That door exists
+  because a genuine exception needs one: a one-line fix, a rights edit, or a machine where
+  Codex is unavailable. Using it is allowed; using it silently is not.
+- **The gate does not cover Codex's own writes.** Hooks intercept Cursor tool calls only. So
+  after a worker writes, the orchestrator must read the diff and run the gates that the hooks
+  would otherwise have run: the locale parity check for `storefront/**`, `secret-guard`'s
+  concern by eye, and `/ux-verify` for anything a buyer sees. A worker's green self-report is
+  not that check.
+
 ### Skills
 
 Installed with the `skills` CLI into `.agents/skills/` (Cursor reads this
@@ -319,6 +392,12 @@ Project-authored skills live in `.cursor/skills/`:
 | `source-connector` | adding a source: spec, tier, credentials, connector, tests |
 | `agent-graph` | LangGraph structure, nodes, state, interrupts, the LLM boundary |
 | `storefront-ux` | locale routing, copy dictionaries, design tokens, shared components, the layout rules per page with their sources, the visual checklist |
+| `codex-second-agent` | the Codex MCP tools, the sandbox modes, the delegation patterns and the CLI runner |
+| `pge-harness` | Planner-Generator-Evaluator: the Generator is a Codex worker, the Evaluator never patches |
+| `ralph-loop` | a task that keeps stalling in the same context: fresh context per iteration, state on disk |
+| `context-layers` | how much to load at each stage of work, and what to do when the context fills |
+| `harness-peers` | Cursor and Codex as peers on one task: roles, isolation, the fallback ladder |
+| `harness-improve` | turning a repeated agent failure into a hook, a sensor, a rule or an AGENTS.md line |
 
 Reinstall or update:
 
@@ -330,16 +409,25 @@ npx skills add pydantic/skills --skill '*' -a cursor --copy -y
 
 ### MCP servers (`.cursor/mcp.json`)
 
+Eleven servers. An `npx`-backed alias is declared in `.cursor/mcp/mcp-aliases.cjs` and
+launched through `.cursor/mcp/run-mcp.cjs`, which resolves a local install or takes a
+cross-process lock so concurrent `npx -y` installs cannot collide in the npm cache. The
+alias table is the single definition of each package; `harness-status.mjs` and
+`setup-mcp.mjs` read it, so an alias and its package cannot drift apart.
+
 | Server | Source | Auth / prerequisite |
 |--------|--------|---------------------|
 | context7 | `@upstash/context7-mcp` | none - library docs, use before coding against an API |
 | sequential-thinking | `@modelcontextprotocol/server-sequential-thinking` | none |
-| langfuse-docs | remote `https://langfuse.com/api/mcp` | none |
-| postgres | `uvx postgres-mcp --access-mode=restricted` | read-only; `DATABASE_URI` in the config points at the local dev database |
+| playwright | `@playwright/mcp` | none - the driver for `/ux-verify` |
+| chrome-devtools | `chrome-devtools-mcp` | none - CDP traces and network inspection |
+| codex | `.cursor/mcp/codex-launcher.cjs` | resolves the Codex CLI from the editor extension |
+| fetch | `uvx mcp-server-fetch` | none |
+| postgres | `uvx postgres-mcp --access-mode=restricted` | read-only; `DATABASE_URI` points at the local dev database |
 | redis | `uvx redis-mcp-server@latest` | none for local Redis |
+| langfuse-docs | remote `https://langfuse.com/api/mcp` | none |
 | github | remote `https://api.githubcopilot.com/mcp/` | `GITHUB_PERSONAL_ACCESS_TOKEN` |
 | stripe | remote `https://mcp.stripe.com` | OAuth |
-| playwright | `@playwright/mcp` | none |
 
 `GITHUB_PERSONAL_ACCESS_TOKEN` is interpolated with `${env:...}`; it is not stored
 in the config. Keep secrets out of `.cursor/mcp.json`; use `${env:VAR}`.
@@ -349,6 +437,11 @@ Verify a fresh checkout resolves every server:
 ```bash
 node scripts/setup-mcp.mjs
 ```
+
+Codex is dispatched through two transports, and choosing the wrong one loses work: the
+`codex` MCP tool for a short exchange, and `scripts/codex-run.mjs` for anything that
+runs for minutes. The MCP request has a timeout; the runner has a durable ledger and
+resumes. `harness/codex-workers.md` is the operator guide.
 
 ### Rules (`.cursor/rules/`)
 
@@ -362,44 +455,70 @@ node scripts/setup-mcp.mjs
 | `05-agent-graphs.mdc` | framework choice, LangGraph state/nodes/edges/interrupts |
 | `06-rights-engine.mdc` | deny by default, evidence, the gate, policy changes |
 | `07-product-surface.mdc` | the buyer surface: specification, localisation, imagery, layout, visual verification |
+| `08-evidence-and-sensors.mdc` | evidence discipline: test the script, prove the sensor can fail, one source of truth, record the defect |
 
 ### Hooks (`.cursor/hooks.json`)
 
 | Hook | Event | Effect |
 |------|-------|--------|
+| `session-start.cjs` | sessionStart | injects the harness entry points, the open changes and the latest lesson; stamps the session marker `codex-gate.cjs` dates the session with |
 | `secret-guard.cjs` | preToolUse on writes | denies a write containing a hardcoded credential (`.env` exempt) |
+| `codex-gate.cjs` | preToolUse on writes | denies a write to product code with no Codex worker behind it - the Codex-first requirement, enforced |
 | `ui-guard.cjs` | preToolUse on writes | denies a storefront edit that hardcodes a buyer-visible string or a language |
 | `policy-guard.cjs` | preToolUse on writes | requires human approval for rights policy files and for harness files |
 | `destructive-guard.cjs` | beforeShellExecution | denies force-push to main/master, `reset --hard`, `clean -fd`, `docker ... -v`, `dropdb`, recursive force deletes |
+| `mcp-audit.cjs` | beforeMCPExecution | denies `danger-full-access` combined with `approval-policy: never`, and a tool that asks to destroy a host resource |
 | `lint-feedback.cjs` | postToolUse on writes | runs `ruff check` on the edited file and returns violations as context |
 | `ui-feedback.cjs` | postToolUse on writes | runs the locale dictionary parity check and returns missing keys as context |
+| `after-file-edit.cjs` | afterFileEdit | appends one line per edit to the git-ignored `.velmor/edit-ledger/` |
+| `stop-gate.cjs` | stop | asks once, at most, for the evidence when a session ends without it |
 
 Hooks are enforcement, not suggestions. Do not work around a hook; if a blocked
 operation is genuinely required, ask the user to run it.
+
+A hook is also the right place for a constraint that must not depend on the agent
+remembering it. `scripts/selftest.mjs` drives every one of them, including the paths
+that must allow, because a permission hook that has quietly stopped denying is the most
+expensive defect the harness can carry.
 
 ### Commands (`.cursor/commands/`)
 
 | Command | Purpose |
 |---------|---------|
-| `/ship <task>` | autonomous orchestrator: propose -> implement (fresh implementer subagent per task, task review, bounded fix loop) -> verify (evidence) -> `/rights-verify` -> `/ux-verify` -> `/review` -> finish -> archive. Stops for the human only at plan approval and integration. |
+| `/ship <task>` | autonomous orchestrator: propose -> implement (fresh implementer subagent per task, task review, bounded fix loop) -> verify (evidence) -> `/rights-verify` -> `/ux-verify` -> `/eval` -> `/review` -> finish -> archive. Stops for the human only at plan approval and integration. |
+| `/eval` | independent Evaluator: grades the change against a fixed rubric from a fresh context, never patches it |
 | `/review` | dispatches `bugbot` + `security-review` as the merge gate; reports PASS / CHANGES REQUIRED |
 | `/rights-verify` | domain runtime verifier: proves the publication gate still refuses what it must |
 | `/ux-verify` | buyer-surface runtime verifier: drives the running shop and proves a buyer can see, understand and buy, in every locale |
+| `/harness-status` | is the harness complete and consistent on this machine |
+| `/diagnose` | root cause of a harness, tooling or agent failure, before any fix |
+| `/improve-harness` | turns a repeated failure into a rule, hook, sensor or spec, recorded in `harness/lessons.md` |
 | `/opsx-*` | OpenSpec: explore, propose, apply, sync, update, archive |
 
 ### Writer/reviewer roles - invoke, do not reimplement
 
 | Role | Tool |
 |------|------|
-| Writer | fresh `generalPurpose` subagent per task (`subagent-driven-development/implementer-prompt.md`) |
+| Writer (default) | Codex worker via `scripts/codex-run.mjs`, prompt from `harness/codex/prompts/build-task.md` |
+| Writer (fallback) | fresh `generalPurpose` subagent per task (`subagent-driven-development/implementer-prompt.md`), only after a classified Codex failure or two failed attempts |
+| Writer (last resort) | the orchestrator itself, reported as such |
 | Task checker | task reviewer subagent (`task-reviewer-prompt.md`) |
+| Independent Evaluator | `/eval` (`.cursor/agents/evaluator.md`) - grades, never patches |
 | Final checker | `bugbot` + `security-review` subagents |
+| Second model family | Codex via `scripts/codex-run.mjs` (`harness/dual-agent.md`) - a worker result is input to verification, never proof of completion |
 | Domain runtime checker | `/rights-verify` |
 | Buyer-surface runtime checker | `/ux-verify` |
-| Policy enforcer | hooks `secret-guard` / `ui-guard` / `policy-guard` / `destructive-guard` (automatic) |
+| Harness sensor | `node scripts/harness-status.mjs`, `node scripts/selftest.mjs` |
+| Codex-first enforcer | hook `codex-gate.cjs` (automatic) |
+| Policy enforcer | hooks `secret-guard` / `ui-guard` / `policy-guard` / `destructive-guard` / `mcp-audit` (automatic) |
 | Contract | OpenSpec specs + `/opsx-*` |
 | Evidence | `verification-before-completion` |
 | Integration | `finishing-a-development-branch` |
+
+Project subagents live in `.cursor/agents/` and are mirrored into `.claude/agents/`
+and `.codex/agents/`, because a subagent defined in one runtime is invisible to the
+other two. Edit `.cursor/agents/` and run `node scripts/sync-agents.mjs`; never edit a
+mirror by hand. `harness-status.mjs` fails when the three copies diverge.
 
 ### Contract: OpenSpec
 
@@ -418,11 +537,14 @@ uv run python -m compileall -q packages velmor
 npm --prefix storefront run lint          # includes the locale dictionary parity check
 npm --prefix storefront run build
 openspec validate --strict "<change>"     # when specs or planning changed
+node scripts/harness-status.mjs           # when rules, hooks, commands, agents or MCP changed
+node scripts/selftest.mjs                 # when a harness script itself changed
 ```
 
 And for anything touching rights, screening, connectors or the gate: `/rights-verify`.
 For anything touching a buyer-facing surface: `/ux-verify` — the screenshots are the
-evidence, and a green suite is not. For the final gate before merge: `/review`.
+evidence, and a green suite is not. For an independent grade before merge: `/eval`.
+For the final gate before merge: `/review`.
 
 Never claim a check passed without its output. Never describe what should happen as
 though it did. If something is unverified, say it is unverified.
@@ -457,3 +579,12 @@ locale.
 - When a spec for a buyer-facing capability states only behaviour, treat that as a
   gap in the spec and fix the spec before implementing. A requirement satisfied by
   a text dump is how the shop once shipped as a list of filenames.
+- A constraint that must bind every runtime goes in this file. `.cursor/rules/`,
+  skills and hooks reach Cursor agents only; Codex reads `AGENTS.md` and nothing else.
+- When a failure repeats, do not fix it twice: run `/diagnose`, then
+  `/improve-harness`. The permanent fix is a hook, a sensor or a line here, plus an
+  entry in `harness/lessons.md` - which is read at every session start, so it is how
+  the harness remembers.
+- Before trusting a check, inject the defect and watch it report. A sensor that has
+  never failed has not been tested, and a green gate is not evidence that the gate
+  works.

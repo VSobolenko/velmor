@@ -397,3 +397,182 @@ defect the next time", so the fix class matters more than the narrative.
   (`systemctl cat velmor-api.service`) and must poll `/health` until it answers, not sleep a fixed
   interval; `systemctl is-active` is not readiness. The `Logfire API returned status code 401`
   startup delay is the separate operational item already named in `HANDOFF.md` section D.
+
+### 2026-09-23 - the Codex review path had never run, and its arguments were wrong in two places
+
+- Symptom: `node scripts/codex-run.mjs review --id <id> --uncommitted` exited 2 in under five
+  seconds without reaching a model, twice in a row, for two different reasons:
+  `error: unexpected argument '--color' found` and then
+  `error: the argument '--uncommitted' cannot be used with '[PROMPT]'`.
+- Root cause: the `review()` branch of the runner was written against an assumed CLI surface and
+  never executed. It passed `--color never`, which `codex exec review` does not accept, and it
+  appended `-` unconditionally as `[PROMPT]`, which `--uncommitted` forbids. The `run()` branch had
+  been exercised by the smoke worker and works, which is exactly why the defect survived: the
+  channel was reported as working after a `run`, and `review` - the independent-second-reader path
+  the whole dual-agent design leans on - had no execution behind it. `harness/codex-workers.md`
+  listed the accepted review flags correctly the entire time, so the document and the code
+  disagreed and nothing compared them.
+- Fix class: code fix + lesson. The accepted flags are a property of the installed CLI, so the
+  check that would have caught it is a comparison against the CLI's own help output.
+- Evidence: `node .cursor/mcp/codex-launcher.cjs exec review --help` lists `-c`, `--uncommitted`,
+  `--base`, `--commit`, `-m`, `--output-last-message`, `--json` and no `--color`; the two failing
+  runs quoted above; and after the fix the same command passed argument parsing and ran for
+  minutes instead of exiting in 4.8 s.
+- Change made: `scripts/codex-run.mjs` no longer passes `--color` to `codex exec review`, and
+  passes `-` only when there is a prompt file to read from stdin. The reasoning is a comment at
+  both sites. The same unconditional `args.push('-')` in `run()` and `resume()` is correct and was
+  left alone: both require a prompt file, so stdin always carries one.
+- A third defect surfaced in the same path once it ran: `review` has no `--sandbox` flag, so the
+  reviewer inherited the CLI default `workspace-write`. `harness/dual-agent.md` names a read-only
+  Codex worker as one of the independent readers, so the sandbox is now pinned with
+  `-c sandbox_mode="read-only"`, the way `resume()` already pinned it. Confirmed from the worker's
+  own start banner, not from the arguments: the banner now reads `sandbox: read-only`.
+- The same session also pinned the model, for cost rather than correctness. `codex debug models`
+  renders the catalog the account can use; the machine's `~/.codex/config.toml` selected
+  `gpt-5.6-sol`, which that catalog describes as the model "for complex work", and a ChatGPT plan's
+  quota paid for it in a handful of calls. `DEFAULT_MODEL = 'gpt-5.6-terra'` - the catalog's
+  "balanced model for straightforward work" - is now the runner's default and `--model` still
+  overrides it. Pinning it in the repository is the point: the model no longer changes when a
+  machine's global config does. The banner is the evidence, and it reads `model: gpt-5.6-terra`.
+
+### 2026-09-23 - three permission hooks were inert, and one of them had no sensor at all
+
+- Symptom: none. `harness-status.mjs` said READY, `selftest.mjs` said PASS, and product writes,
+  rights-policy edits and storefront copy edits all went through unguarded.
+- Root cause: the same absolute-versus-relative path mistake in three `preToolUse` guards. The
+  runtime sends an **absolute** `tool_input.file_path` (`d:\Python\Velmor\packages\...`), and each
+  guard compared it against repository-relative roots (`packages/`, `.cursor/rules/`,
+  `storefront/src/`). Every real write therefore matched no entry and took the allow branch before
+  the guard looked at anything: `codex-gate.cjs` never read the worker ledger, `policy-guard.cjs`
+  never asked for approval on the rights policy surface, `ui-guard.cjs` never scanned for
+  hardcoded copy. The synthetic payloads in `selftest.mjs` used the relative form, so the suite
+  certified the shape the runtime does not send - the same class of defect as the BOM one already
+  recorded above, and the second time this file has had to record it.
+- Aggravating fact: `ui-guard.cjs` had **no check in `selftest.mjs` at all**. A hook with no
+  sensor is a hook nobody has ever seen work or fail.
+- Fix class: code fix + sensor, in the order that proves the sensor: add the checks first, watch
+  them fail, then fix.
+- Evidence: before the fix, `node scripts/selftest.mjs` reported exactly four new failures and
+  nothing else -
+  `FAIL asks before an edit to the publication gate - the absolute path the runtime sends - allow`,
+  `FAIL asks before an edit to a rule - the absolute path the runtime sends - allow`,
+  `FAIL denies Cyrillic copy in a component - the absolute path the runtime sends - allow`,
+  `FAIL denies a literal language in lang= - allow`, `VERDICT: FAIL (4 checks)`.
+  `codex-gate` was caught by an instrumentation run first: the captured payload carried
+  `tool_name: "Write"`, an absolute `file_path`, and a recorded decision of `allow`, which refuted
+  the "hooks do not fire for subagents" hypothesis and pinned the path form as the cause.
+- Change made: `workspaceRelative(filePath, root)` moved into `.cursor/hooks/lib/hook-io.cjs` and
+  is imported by all three guards, because one definition is what stops the next hook from
+  repeating the mistake; each local copy was deleted. `selftest.mjs` gained absolute-path checks
+  for all three, including the allow direction so the resolution cannot become a blanket deny, and
+  the first checks `ui-guard` has ever had.
+- A crash in a `failClosed` hook blocks the edit that would repair it, which is worth knowing
+  before it happens: removing `normalise` while its call site still referenced it made
+  `policy-guard.cjs` and `ui-guard.cjs` throw `ReferenceError`, and the write tool could no longer
+  touch either file. The repair went through the shell, and the next multi-site edit to a
+  fail-closed hook should be one atomic write rather than two edits with a broken state between.
+
+### 2026-09-23 - `harness-status.mjs --root` read the alias table of the wrong tree
+
+- Symptom: none observed. Found by an independent reviewer reading the diff, not by a failing
+  check.
+- Root cause: `import aliases from '../.cursor/mcp/mcp-aliases.cjs'` is a static import, resolved
+  relative to the script, so it always read this checkout's table. `ROOT` becomes the `--root`
+  directory, and the alias check then compared the inspected tree's `mcp.json` against this
+  checkout's table: a target whose own `mcp-aliases.cjs` was missing an alias passed whenever this
+  checkout happened to have it. `selftest.mjs` drives the sensor with `--root`, so the blind spot
+  was reachable, and a sensor that reads the wrong tree is not a sensor.
+- Fix class: code fix + sensor, proved in both directions.
+- Evidence: with the defect injected (the table read from this checkout), the new check reported
+  `FAIL reads the alias table from the inspected tree, not from this checkout - PASS context7:
+  alias "context7" resolves in .cursor/mcp/mcp-aliases.cjs`, `VERDICT: FAIL (1 checks)` - the
+  failure proves the target tree's empty table was never consulted. Restored:
+  `PASS reads the alias table from the inspected tree, not from this checkout - FAIL context7:
+  alias "context7" resolves`, `VERDICT: PASS`, `harness-status: READY`.
+- Change made: the table is loaded from `ROOT` at runtime; `selftest.mjs` gained a case that
+  builds a target tree whose own alias table is empty and requires `context7` to fail there.
+
+### 2026-09-23 - a killed Codex runner left the gate open indefinitely
+
+- Symptom: none, and none was possible while the state existed: `codex-gate` allowed product
+  writes because the ledger still held a worker.
+- Root cause: eligibility was `worker.running || worker.startedAt >= floor`, where `running` means
+  "no exit file". A runner killed by an operator - `Stop-Process` on a backgrounded job, a killed
+  shell - writes no exit record, and `running` bypassed the session window that exists to stop
+  "Codex ran once, ever". A worker from a previous session therefore counted forever. Two killed
+  Codex reviews in this session left exactly that state, and it was found only because the ledger
+  was read while stopping them.
+- Fix class: code fix + sensor, proved in both directions.
+- Evidence: with the defect injected (`running` bypassing liveness again), the new check reported
+  `FAIL denies a worker from a previous session that was killed, not merely a stale timestamp -
+  allow`, `VERDICT: FAIL (1 checks)`. Restored: the same check reports `deny`, `VERDICT: PASS`,
+  `harness-status: READY`.
+- A wrong test is worse than no test, and this one was caught by reading the rule it was testing:
+  the first version of the check dated the killed worker "now", so the session window - not
+  liveness - decided it, and the check failed for a reason unrelated to the defect. The window
+  clause is deliberate: a worker that started in this session counts even after it exits. The
+  defect was only ever the cross-session case, so the check now dates its worker before the
+  session epoch.
+- Change made: `processAlive(pid)` in `codex-gate.cjs` probes the runner's own recorded `pid`
+  (`process.kill(pid, 0)`; `EPERM` means it exists), a record without a pid still falls back to the
+  window, and `selftest.mjs` asserts both directions.
+- Still open, named rather than fixed: `scripts/codex-run.mjs` has no `stop` command and no signal
+  handler, so an operator termination is never written to the ledger and `list` keeps calling a
+  dead worker `running`. Liveness now compensates inside the gate, and the ledger itself still
+  lies about the outcome.
+
+### 2026-09-24 - the ledger called two dead Codex workers `running` for two and a half hours
+
+- Symptom: `codex-run.mjs list` reported `derive-publish-review3` and `derive-publish-review5` as
+  `running` after 155 and 140 minutes, in a session with no such processes. Both recorded pids were
+  gone: `alive=False` for 19032 and 2368.
+- Root cause: `status()` took the state from `meta.status` - the word written at launch, `running` -
+  and overwrote it only when an exit record existed. A killed runner writes no exit record, so the
+  fallback was its own launch-time claim and nothing ever contradicted it. This is the ledger half of
+  the previous entry's named-open item: liveness had been added to `codex-gate`, but the reading a
+  human uses to decide whether to wait or to re-dispatch still said the worker was alive.
+- Fix class: code fix + sensor, proved in both directions.
+- Evidence: with the defect injected (a ledger entry carrying pid `2147483000`, beyond any
+  addressable process, and no exit record), the reconstructed pre-fix `status()` printed
+  `running selftest-dead`; the fixed `status()` on the same entry printed `LOST(2147483000)`. A
+  two-sided control on one code path - a live child pid printed `running`, the dead pid printed
+  `LOST` - shows the reading is driven by liveness and not by the fixture. The new `selftest.mjs`
+  section reports `PASS a worker whose process is gone is reported LOST, never running`,
+  `VERDICT: PASS`, `harness-status: READY`.
+- Change made: `status()` in `scripts/codex-run.mjs` probes the recorded pid when no exit record
+  exists and reports `LOST(<pid>)`. `processAlive` there is a deliberate twin of the one in
+  `codex-gate.cjs`, and both files name the other so the pair cannot drift unnoticed; they cannot
+  share one definition because the gate is CommonJS and the runner is ESM, and a hook cannot await a
+  dynamic import. `LOST` is deliberately neither `running` nor `FAILED`: nothing observed how the
+  worker ended, so the outcome is unknown rather than chosen, and `resume` stays valid because it
+  resumes by session id.
+- Still open, named rather than fixed: the runner has no `stop` command and no signal handler, so an
+  operator kill is still not recorded as an outcome. `status` now reports it honestly, but *why* the
+  worker ended is still lost at the moment it happens.
+
+### 2026-09-24 - a shell byte edit is reverted by the next editor-tool write
+
+- Symptom: `node --check scripts/selftest.mjs` failed with `SyntaxError: Invalid or unexpected token`
+  on `#!/usr/bin/env node`, while `node scripts/selftest.mjs` ran the same file without complaint.
+  The file carried a UTF-8 BOM, which `node --check` refuses at the shebang line.
+- Root cause of the BOM: pre-existing in `HEAD`, and `selftest.mjs` was the only harness script with
+  one. The script whose job is proving the harness's own sensors work could not itself be
+  syntax-checked, and no gate noticed. A BOM is invisible in every editor and in every diff.
+- Root cause of the *return*, which is the part worth remembering: stripping the BOM with a byte
+  write from the shell worked, and the very next `StrReplace` on the same file put it back. The
+  editor holds the file in a buffer and rewrites the whole file from that buffer, so a
+  shell-level byte edit to a file the editor has open is silently undone by the next tool edit.
+  This is the same class as the `.cursorignore` lesson above: the disagreement is at the tool
+  layer, not the filesystem, and the fix is ordering rather than permissions.
+- Fix class: sensor + ordering. Strip the BOM as the *last* action on the file, after every tool
+  edit, not before it.
+- Evidence: `node --check scripts/selftest.mjs` returned exit 1 with the BOM and exit 0 without it.
+  The new check reports `FAIL no harness script carries a UTF-8 BOM ... - scripts/_bom-probe.mjs`,
+  `VERDICT: FAIL (1 checks)` with the defect injected, and
+  `PASS no harness script carries a UTF-8 BOM (it makes \`node --check\` reject the shebang)`,
+  `VERDICT: PASS`, `harness-status: READY` once it is removed. The sensor found the real file itself
+  on its first run, which is how the silent revert was caught.
+- Change made: `selftest.mjs` scans `scripts/` and `.cursor/hooks/` for U+FEFF at the start of any
+  `.mjs`/`.cjs`/`.js` file and fails the run, and the BOM was stripped from `selftest.mjs`. The
+  check is a byte comparison rather than a `node --check` spawn, so it costs no processes and names
+  the offending file.

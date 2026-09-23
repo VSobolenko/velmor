@@ -18,12 +18,10 @@ const path = require('path')
 
 const TIMEOUT_MS = 45000
 
+const hookIo = require('./lib/hook-io.cjs')
+
 function readInput() {
-  try {
-    return fs.readFileSync(0, 'utf8')
-  } catch (error) {
-    return ''
-  }
+  return hookIo.readStdin()
 }
 
 function targetPath(toolInput) {

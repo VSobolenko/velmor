@@ -1,15 +1,24 @@
 {
   "mcpServers": {
     "context7": {
-      "command": "npx",
-      "args": ["-y", "@upstash/context7-mcp@latest"]
+      "command": "node",
+      "args": ["${workspaceFolder}/.cursor/mcp/run-mcp.cjs", "context7"]
     },
     "sequential-thinking": {
-      "command": "npx",
-      "args": ["-y", "@modelcontextprotocol/server-sequential-thinking"]
+      "command": "node",
+      "args": ["${workspaceFolder}/.cursor/mcp/run-mcp.cjs", "sequential-thinking"]
     },
-    "langfuse-docs": {
-      "url": "https://langfuse.com/api/mcp"
+    "playwright": {
+      "command": "node",
+      "args": ["${workspaceFolder}/.cursor/mcp/run-mcp.cjs", "playwright"]
+    },
+    "chrome-devtools": {
+      "command": "node",
+      "args": ["${workspaceFolder}/.cursor/mcp/run-mcp.cjs", "chrome-devtools"]
+    },
+    "fetch": {
+      "command": "uvx",
+      "args": ["mcp-server-fetch"]
     },
     "postgres": {
       "command": "uvx",
@@ -28,6 +37,9 @@
         "redis://localhost:6379/0"
       ]
     },
+    "langfuse-docs": {
+      "url": "https://langfuse.com/api/mcp"
+    },
     "github": {
       "url": "https://api.githubcopilot.com/mcp/",
       "headers": {
@@ -36,10 +48,6 @@
     },
     "stripe": {
       "url": "https://mcp.stripe.com"
-    },
-    "playwright": {
-      "command": "npx",
-      "args": ["-y", "@playwright/mcp@latest"]
     },
     "codex": {
       "command": "node",

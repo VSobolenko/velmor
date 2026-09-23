@@ -64,12 +64,10 @@ const RULES = [
   }
 ]
 
+const hookIo = require('./lib/hook-io.cjs')
+
 function readInput() {
-  try {
-    return fs.readFileSync(0, 'utf8')
-  } catch (error) {
-    return ''
-  }
+  return hookIo.readStdin()
 }
 
 function allow() {

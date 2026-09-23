@@ -44,21 +44,15 @@ function targetPath(toolInput) {
   return toolInput.path || toolInput.file_path || toolInput.filePath || toolInput.target_file || ''
 }
 
-function normalise(filePath) {
-  return String(filePath).replace(/\\/g, '/').replace(/^\.\//, '')
-}
-
 function matches(candidate, entry) {
   if (entry.endsWith('/')) return candidate === entry.slice(0, -1) || candidate.startsWith(entry)
   return candidate === entry
 }
 
+const hookIo = require('./lib/hook-io.cjs')
+
 function readInput() {
-  try {
-    return fs.readFileSync(0, 'utf8')
-  } catch (error) {
-    return ''
-  }
+  return hookIo.readStdin()
 }
 
 function allow() {
@@ -92,7 +86,14 @@ function main() {
     return
   }
 
-  const candidate = normalise(targetPath(payload.tool_input || payload.toolInput || {}))
+  // Resolved against the workspace root: the runtime sends an absolute `file_path`, and the
+  // lists above are repository-relative. See `workspaceRelative` in `lib/hook-io.cjs` for why
+  // comparing the two forms directly made this hook inert for every real write.
+  const root = hookIo.workspaceRoot(payload)
+  const candidate = hookIo.workspaceRelative(
+    targetPath(payload.tool_input || payload.toolInput || {}),
+    root
+  )
   if (candidate === '') {
     allow()
     return

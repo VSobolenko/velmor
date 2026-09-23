@@ -1,0 +1,55 @@
+﻿# Keep the Agent index lean and secrets out of @-context.
+#
+# This file only keeps paths out of the Agent's index and out of @-file suggestions. The
+# terminal and MCP tools can still reach everything listed here, so it is not a security
+# boundary: `.cursor/hooks/secret-guard.cjs`, `policy-guard.cjs` and
+# `destructive-guard.cjs` are the backstop.
+
+# Harness scratch state: Codex worker ledgers, prompts, the edit ledger, worktrees.
+.velmor/
+.superpowers/
+.worktrees/
+
+# Secrets and credentials. `.env.example` stays indexable on purpose.
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+.credentials
+google-services*.json
+google-service-account.json
+
+# Local data and build artifacts
+data/
+artifacts/
+extracted_images/
+*.bundle
+
+# Python
+.venv/
+__pycache__/
+*.py[codz]
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+htmlcov/
+.coverage
+coverage.xml
+
+# Node and the storefront presentation layer
+node_modules/
+.next/
+out/
+
+# IDE and OS noise
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# Logs and local service state
+*.log
+*.rdb
+*.pid

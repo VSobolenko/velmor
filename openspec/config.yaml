@@ -58,6 +58,14 @@ context: |
   generic advice, and .cursor/rules/02-architecture-layers.mdc fixes the allowed
   import direction between packages.
 
+  Agent harness: the repository is worked on by agents under a harness. The loop,
+  the entry points and the evidence rules are in harness/README.md, and
+  harness/lessons.md records the defects that already happened once. Two rules bind
+  a writer here: a grader is never the author (/eval and /review run from a fresh
+  context), and a check is not evidence until it has been shown to fail. A
+  constraint that must bind Codex too belongs in AGENTS.md, which is the only file
+  Codex reads from this repository.
+
 rules:
   proposal:
     - State the licence concern explicitly - which licence action, which evidence,
@@ -148,6 +156,11 @@ operations:
       - When a task touches a buyer-facing surface, run `npm --prefix storefront
         run lint` (it checks dictionary parity) and look at the rendered page.
         Do not mark such a task done on the strength of a passing test suite.
+      - Before claiming a task done, run the gate for what it touched and quote its
+        output - /rights-verify for the verdict path, /ux-verify for a buyer
+        surface, node scripts/harness-status.mjs for a rule, hook, command, agent or
+        MCP change. A task with no gate run against it is unverified, and saying so
+        is required rather than optional.
   archive:
     guidance:
       - Summarise what changed in what Velmor may publish, if anything. An
