@@ -27,7 +27,7 @@ CANDIDATE_B = 'openverse:2'
 PROVIDER_ID = 'fake'
 RETURN_URL = 'https://shop.example/return'
 UNIT_AMOUNT = Decimal('12.50')
-CURRENCY = 'BYN'
+CURRENCY = 'USD'
 
 
 class FakePaymentProvider:

@@ -31,7 +31,7 @@ OLDEST = datetime(2026, 9, 18, 8, 0, tzinfo=UTC)
 DIGEST = 'a' * 64
 ORIGIN_URL = 'https://secret-origin.example/never-leak/asset.bin'
 UNIT_AMOUNT = Decimal('9.99')
-CURRENCY = 'BYN'
+CURRENCY = 'USD'
 
 FORBIDDEN_KEYS = ('origin_url', 'content_digest', 'landing_url', 'storage_path', 'download_url')
 
@@ -440,7 +440,7 @@ class TestCatalogueCard:
             category_id='cat-photography',
             category_slug='photography',
             unit_amount='9.99',
-            currency='BYN',
+            currency='USD',
             preview_url='/catalogue/goods/openverse:1/preview',
             preview_is_cover=False,
             content_type='image',

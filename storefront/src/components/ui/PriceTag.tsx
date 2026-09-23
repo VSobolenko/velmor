@@ -3,7 +3,7 @@ import { classNames } from "./classes";
 type Props = {
   /** A decimal amount exactly as the API sends it: `"9.99"`. Never reformatted here. */
   amount: string;
-  /** An ISO code: `"BYN"`. */
+  /** An ISO code: `"USD"`. */
   currency: string;
   size?: "md" | "lg";
 };

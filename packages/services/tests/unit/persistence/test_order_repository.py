@@ -31,7 +31,7 @@ def build_order(
         order_id=order_id,
         buyer_id='buyer-1',
         state=state,
-        currency='BYN',
+        currency='USD',
         lines=(line,),
         total=Decimal('10.00'),
         provider_id=provider_id,

@@ -25,7 +25,7 @@ NOW = datetime(2026, 9, 20, 12, 0, tzinfo=UTC)
 OPERATOR_KEY = SecretStr('api-unit-operator-refund-key')
 GRANT_SECRET = SecretStr('api-unit-delivery-grant-secret')
 UNIT_AMOUNT = Decimal('9.99')
-CURRENCY = 'BYN'
+CURRENCY = 'USD'
 STOREFRONT_DOMAIN = 'shop.example'
 DEV_ORIGIN = 'http://localhost:3000'
 DISALLOWED_ORIGIN = 'https://evil.example'

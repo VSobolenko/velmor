@@ -25,7 +25,7 @@ def sign_payload(payload: bytes, secret: str = WEBHOOK_SECRET) -> str:
 
 def build_order(
     *,
-    currency: str = 'BYN',
+    currency: str = 'USD',
     unit_amount: Decimal = Decimal('9.99'),
     quantity: int = 1,
 ) -> Order:
@@ -52,7 +52,7 @@ def success_payload(
     *,
     order_id: str = ORDER_ID,
     amount: str = '9.99',
-    currency: str = 'BYN',
+    currency: str = 'USD',
     succeeded: bool = True,
     provider_reference: str | None = None,
 ) -> bytes:
@@ -90,7 +90,7 @@ class TestStubParseNotification:
 
         assert confirmation.order_id == ORDER_ID
         assert confirmation.amount == Decimal('9.99')
-        assert confirmation.currency == 'BYN'
+        assert confirmation.currency == 'USD'
         assert confirmation.succeeded is True
         assert confirmation.provider_reference == f'stub-{ORDER_ID}'
 

@@ -59,7 +59,7 @@ def basic_authorization(shop_id: str = SHOP_ID, secret: str = SECRET_KEY) -> str
 
 def build_order(
     *,
-    currency: str = 'BYN',
+    currency: str = 'USD',
     unit_amount: Decimal = Decimal('10.50'),
     quantity: int = 1,
 ) -> Order:
@@ -86,7 +86,7 @@ def transaction_payload(
     *,
     status: str = 'successful',
     amount: int = 1050,
-    currency: str = 'BYN',
+    currency: str = 'USD',
     tracking_id: str = ORDER_ID,
     uid: str = TRANSACTION_UID,
 ) -> bytes:
@@ -150,7 +150,7 @@ class TestStartPayment:
         assert checkout['transaction_type'] == 'payment'
         assert checkout['test'] is True
         assert checkout['order']['amount'] == 1050
-        assert checkout['order']['currency'] == 'BYN'
+        assert checkout['order']['currency'] == 'USD'
         assert checkout['order']['tracking_id'] == ORDER_ID
         assert checkout['settings']['notification_url'] == NOTIFICATION_URL
         assert 'payment_method' not in checkout
@@ -194,7 +194,7 @@ class TestParseNotification:
         assert confirmation.order_id == ORDER_ID
         assert confirmation.provider_reference == TRANSACTION_UID
         assert confirmation.amount == Decimal('10.50')
-        assert confirmation.currency == 'BYN'
+        assert confirmation.currency == 'USD'
 
     def test_valid_signature_expired_yields_non_succeeded(self) -> None:
         payload = transaction_payload(status='expired')

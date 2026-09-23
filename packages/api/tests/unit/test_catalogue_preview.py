@@ -34,7 +34,7 @@ CANDIDATE_ID = 'openverse:1'
 OTHER_ID = 'openverse:2'
 NOW = datetime(2026, 9, 20, 12, 0, tzinfo=UTC)
 UNIT_AMOUNT = Decimal('9.99')
-CURRENCY = 'BYN'
+CURRENCY = 'USD'
 OPERATOR_KEY = SecretStr('catalogue-preview-operator-key')
 GRANT_SECRET = SecretStr('catalogue-preview-grant-secret')
 CACHE_MAX_BYTES = 8_000_000

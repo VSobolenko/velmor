@@ -43,7 +43,7 @@ RETURN_URL = 'https://shop.example/return'
 _GRANT_SECRET = SecretStr('storefront-unit-grant-secret')
 _OPERATOR_KEY = SecretStr('storefront-unit-operator-key')
 _UNIT_AMOUNT = Decimal('9.99')
-_CURRENCY = 'BYN'
+_CURRENCY = 'USD'
 
 
 class StorefrontHarness:

@@ -39,7 +39,7 @@ NOW = datetime(2026, 9, 20, 12, 0, tzinfo=UTC)
 EARLIER = datetime(2026, 9, 19, 8, 0, tzinfo=UTC)
 OLDEST = datetime(2026, 9, 18, 8, 0, tzinfo=UTC)
 UNIT_AMOUNT = Decimal('9.99')
-CURRENCY = 'BYN'
+CURRENCY = 'USD'
 OPERATOR_KEY = SecretStr('catalogue-browse-operator-key')
 GRANT_SECRET = SecretStr('catalogue-browse-grant-secret')
 FORBIDDEN_KEYS = ('origin_url', 'content_digest', 'storage_path')
@@ -543,7 +543,7 @@ class TestCatalogueCard:
         assert body['category_id'] == 'cat-images'
         assert body['category_slug'] == 'images'
         assert body['unit_amount'] == '9.99'
-        assert body['currency'] == 'BYN'
+        assert body['currency'] == 'USD'
         assert body['content_type'] == 'image'
         assert body['size_bytes'] == 1024
         assert body['published_at'] == '2026-09-19T08:00:00Z'

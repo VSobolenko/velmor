@@ -21,11 +21,11 @@ class TestPaymentProtocolModels:
             provider_reference='ref-1',
             order_id='order-1',
             amount=Decimal('12.50'),
-            currency='BYN',
+            currency='USD',
             succeeded=True,
         )
 
         assert confirmation.amount == Decimal('12.50')
-        assert confirmation.currency == 'BYN'
+        assert confirmation.currency == 'USD'
         assert confirmation.succeeded is True
         assert confirmation.model_config.get('frozen') is True

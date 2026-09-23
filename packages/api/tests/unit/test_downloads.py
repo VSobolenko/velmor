@@ -39,7 +39,7 @@ BUYER_HEADER = 'X-Buyer-Id'
 OPERATOR_KEY = SecretStr('api-unit-operator-refund-key')
 BEPAID_NOTIFICATION = 'https://shop.example/webhooks/bepaid'
 CATALOGUE_UNIT_AMOUNT = Decimal('9.99')
-CATALOGUE_CURRENCY = 'BYN'
+CATALOGUE_CURRENCY = 'USD'
 
 
 class FixedClock:

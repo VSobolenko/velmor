@@ -37,8 +37,8 @@ class TestCommerceSettings:
         'DELIVERY_GRANT_LIFETIME_SECONDS': '900',
         'DELIVERY_CACHE_MAX_BYTES': '268435456',
         'DELIVERY_CACHE_DIR': 'var/delivery-cache',
-        'CATALOGUE_UNIT_AMOUNT': '9.99',
-        'CATALOGUE_CURRENCY': 'BYN',
+        'CATALOGUE_UNIT_AMOUNT': '3.00',
+        'CATALOGUE_CURRENCY': 'USD',
     }
 
     SECRET_FIELDS = {
@@ -79,8 +79,8 @@ class TestCommerceSettings:
         assert settings.delivery_grant_lifetime_seconds == 900
         assert settings.delivery_cache_max_bytes == 268435456
         assert settings.delivery_cache_dir == Path(self.COMMERCE_VALUES['DELIVERY_CACHE_DIR'])
-        assert settings.catalogue_unit_amount == Decimal('9.99')
-        assert settings.catalogue_currency == 'BYN'
+        assert settings.catalogue_unit_amount == Decimal('3.00')
+        assert settings.catalogue_currency == 'USD'
 
     def test_the_secret_fields_are_secret_str(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
