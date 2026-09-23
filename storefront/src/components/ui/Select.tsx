@@ -16,6 +16,8 @@ type Props = Omit<SelectHTMLAttributes<HTMLSelectElement>, "id" | "children"> & 
   hideLabel?: boolean;
   /** A validation message. Present means invalid, and the control is described by it. */
   error?: string;
+  /** Lets an inline control size itself to its contents instead of filling its container. */
+  fullWidth?: boolean;
 };
 
 export function Select({
@@ -23,6 +25,7 @@ export function Select({
   options,
   hideLabel = false,
   error,
+  fullWidth = true,
   className,
   ...rest
 }: Props) {
@@ -30,7 +33,7 @@ export function Select({
   const errorId = `${id}-error`;
   const invalid = error !== undefined;
   return (
-    <div className="flex w-full flex-col gap-1">
+    <div className={classNames("flex flex-col gap-1", fullWidth ? "w-full" : "w-auto")}>
       <label
         htmlFor={id}
         className={hideLabel ? "sr-only" : "text-sm font-medium text-ink"}

@@ -152,6 +152,10 @@ export class CommerceApiClient {
     );
   }
 
+  async listCheckoutProviders(): Promise<string[]> {
+    return this.requestJson<string[]>("GET", "/checkout/providers", false);
+  }
+
   async startCheckout(
     body: CheckoutStartRequest,
   ): Promise<CheckoutStartResponse> {

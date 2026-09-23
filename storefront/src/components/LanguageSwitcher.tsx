@@ -18,6 +18,7 @@ type Props = {
   /** The accessible name of the control, in the active locale. */
   label: string;
   options: readonly LocaleOption[];
+  compact?: boolean;
 };
 
 /**
@@ -25,7 +26,7 @@ type Props = {
  * the new prefix. The query string is read at change time: it is not part of the rendered
  * shell, and `useSearchParams` would put a Suspense boundary in front of every page.
  */
-export function LanguageSwitcher({ locale, label, options }: Props) {
+export function LanguageSwitcher({ locale, label, options, compact = false }: Props) {
   const router = useRouter();
   const pathname = usePathname();
   const [pending, setPending] = useState(false);
@@ -50,6 +51,7 @@ export function LanguageSwitcher({ locale, label, options }: Props) {
     <Select
       label={label}
       hideLabel
+      fullWidth={!compact}
       disabled={pending}
       value={locale}
       options={options.map((option) => ({

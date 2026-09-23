@@ -145,6 +145,7 @@
   "checkout.chooseProvider": "Выберите способ оплаты",
   "checkout.providerStripe": "Stripe (карта)",
   "checkout.providerBepaid": "bePaid (карта / ЕРИП)",
+  "checkout.providerStub": "Демо-оплата (тест)",
   "checkout.pay": "Оплатить",
   "checkout.redirecting": "Перенаправление…",
   "checkout.licenceAck": "Я ознакомился с лицензией и обязанностями по каждому товару в заказе.",

@@ -37,7 +37,7 @@ export function SiteHeader({ locale, dict }: Props) {
 
   return (
     <header className="sticky top-0 z-40 border-b border-line bg-surface/95 backdrop-blur">
-      <div className="mx-auto flex w-full max-w-6xl flex-wrap items-center gap-2 px-4 py-2">
+      <div className="relative mx-auto flex h-16 w-full max-w-6xl flex-nowrap items-center gap-2 px-4">
         {/* The wordmark is the shop's own link home: it already renders the anchor and the
             accessible name, so wrapping it in another link would nest two links to one target. */}
         <Wordmark
@@ -47,7 +47,7 @@ export function SiteHeader({ locale, dict }: Props) {
           size="sm"
         />
 
-        <nav aria-label={dict["nav.label"]} className="hidden md:block">
+        <nav aria-label={dict["nav.label"]} className="hidden lg:block">
           <ul className="flex items-center gap-1">
             {links.map((link) => (
               <li key={link.href}>
@@ -63,7 +63,7 @@ export function SiteHeader({ locale, dict }: Props) {
         </nav>
 
         <form
-          className="order-last flex w-full items-end gap-2 md:order-none md:ml-auto md:w-auto"
+          className="ml-auto hidden items-end gap-2 lg:flex"
           role="search"
           action={catalogue}
           method="get"
@@ -74,26 +74,41 @@ export function SiteHeader({ locale, dict }: Props) {
             name="q"
             type="search"
             placeholder={dict["common.searchPlaceholder"]}
-            className="md:w-56"
+            className="lg:w-56"
           />
           <Button type="submit" variant="secondary">
             {dict["common.search"]}
           </Button>
         </form>
 
-        <LanguageSwitcher
-          locale={locale}
-          label={dict["common.language"]}
-          options={localeOptions}
-        />
+        <div className="hidden lg:block">
+          <LanguageSwitcher
+            compact
+            locale={locale}
+            label={dict["common.language"]}
+            options={localeOptions}
+          />
+        </div>
 
-        <CartLink label={dict["nav.cart"]} countLabel={dict["cart.countLabel"]} />
+        <div className="ml-auto lg:ml-0">
+          <CartLink label={dict["nav.cart"]} countLabel={dict["cart.countLabel"]} />
+        </div>
 
         <MobileNav
           links={links}
           openLabel={dict["nav.openMenu"]}
           closeLabel={dict["nav.closeMenu"]}
           title={dict["nav.label"]}
+          searchAction={catalogue}
+          searchLabel={dict["common.searchLabel"]}
+          searchPlaceholder={dict["common.searchPlaceholder"]}
+          languageSwitcher={
+            <LanguageSwitcher
+              locale={locale}
+              label={dict["common.language"]}
+              options={localeOptions}
+            />
+          }
         />
       </div>
     </header>

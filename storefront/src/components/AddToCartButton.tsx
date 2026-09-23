@@ -60,10 +60,16 @@ export function AddToCartButton({
       onClick={onClick}
     >
       <span className="grid">
-        <span className="col-start-1 row-start-1" aria-hidden={added}>
+        <span
+          className={`col-start-1 row-start-1${added ? " invisible" : ""}`}
+          aria-hidden={added}
+        >
           {label}
         </span>
-        <span className="col-start-1 row-start-1" aria-hidden={!added}>
+        <span
+          className={`col-start-1 row-start-1${added ? "" : " invisible"}`}
+          aria-hidden={!added}
+        >
           {addedLabel}
         </span>
       </span>

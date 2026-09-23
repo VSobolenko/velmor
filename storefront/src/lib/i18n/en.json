@@ -145,6 +145,7 @@
   "checkout.chooseProvider": "Choose a payment method",
   "checkout.providerStripe": "Stripe (card)",
   "checkout.providerBepaid": "bePaid (card / ERIP)",
+  "checkout.providerStub": "Demo payment (test)",
   "checkout.pay": "Pay",
   "checkout.redirecting": "Redirecting…",
   "checkout.licenceAck": "I have read the licence and the obligations for every good in this order.",

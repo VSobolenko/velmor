@@ -62,7 +62,7 @@ export default function CartPage() {
                     <div className="flex min-w-0 flex-1 flex-col gap-2">
                       <div className="flex flex-wrap items-baseline justify-between gap-2">
                         <Link
-                          className="min-w-0 flex-1 font-heading text-base font-semibold leading-snug text-ink hover:underline"
+                          className="tap-target inline-flex min-w-0 flex-1 items-center font-heading text-base font-semibold leading-snug text-ink hover:underline"
                           href={localePath(
                             locale,
                             `/goods/${encodeURIComponent(line.candidate_id)}`,

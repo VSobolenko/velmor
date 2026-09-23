@@ -83,7 +83,7 @@ export function Button({
     >
       <span className="grid">
         <span
-          className="col-start-1 row-start-1"
+          className={`col-start-1 row-start-1${busyLabel !== undefined ? " invisible" : ""}`}
           aria-hidden={busyLabel !== undefined}
         >
           {children}

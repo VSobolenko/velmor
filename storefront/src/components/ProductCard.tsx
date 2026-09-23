@@ -64,7 +64,10 @@ export function ProductCard({ card, locale, dict }: Props) {
 
       <div className="flex flex-1 flex-col gap-1 p-4">
         <h3 className="font-heading text-base font-semibold leading-snug text-ink">
-          <Link className="after:absolute after:inset-0" href={href}>
+          <Link
+            className="flex min-h-11 min-w-11 items-center after:absolute after:inset-0"
+            href={href}
+          >
             {card.title}
           </Link>
         </h3>

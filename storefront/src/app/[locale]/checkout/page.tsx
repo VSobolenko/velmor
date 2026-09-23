@@ -6,6 +6,7 @@ import { useCart } from "@/components/CartProvider";
 import { PaymentMarks } from "@/components/PaymentMarks";
 import { Button, buttonClassName } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
+import { Checkbox } from "@/components/ui/Checkbox";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { ErrorState } from "@/components/ui/ErrorState";
 import { PriceTag } from "@/components/ui/PriceTag";
@@ -23,12 +24,11 @@ import { useLocale } from "@/lib/i18n/use-locale";
 /** Where the checkout page leaves the order id for the return page when the provider omits it. */
 const ORDER_STORAGE_KEY = "velmor.checkout.order_id";
 
-type ProviderId = "stripe" | "bepaid";
-
-const PROVIDERS: { id: ProviderId; labelKey: keyof Dictionary }[] = [
-  { id: "stripe", labelKey: "checkout.providerStripe" },
-  { id: "bepaid", labelKey: "checkout.providerBepaid" },
-];
+const PROVIDER_LABEL_KEYS: Record<string, keyof Dictionary> = {
+  stripe: "checkout.providerStripe",
+  bepaid: "checkout.providerBepaid",
+  stub: "checkout.providerStub",
+};
 
 type DisclosureFieldKey = Exclude<
   keyof SellerDisclosurePayload,
@@ -60,6 +60,11 @@ function missingLabel(name: string, dict: Dictionary): string {
   return field === undefined ? name : dict[field.labelKey];
 }
 
+function providerLabel(id: string, dict: Dictionary): string {
+  const labelKey = PROVIDER_LABEL_KEYS[id];
+  return labelKey === undefined ? id : dict[labelKey];
+}
+
 /** The one currency a cart may be paid in; `null` when it is empty or holds more than one. */
 function cartCurrency(lines: CartLine[]): string | null {
   if (lines.length === 0) {
@@ -81,7 +86,9 @@ export default function CheckoutPage() {
   const [disclosureFailed, setDisclosureFailed] = useState(false);
   /* Bumped by the retry control to re-run the disclosure fetch without a page reload. */
   const [disclosureAttempt, setDisclosureAttempt] = useState(0);
-  const [providerId, setProviderId] = useState<ProviderId>("stripe");
+  const [providers, setProviders] = useState<string[] | null>(null);
+  const [providersFailed, setProvidersFailed] = useState(false);
+  const [providerId, setProviderId] = useState<string | null>(null);
   const [accepted, setAccepted] = useState(false);
   const [acknowledgementMissing, setAcknowledgementMissing] = useState(false);
   const [payError, setPayError] = useState<string | null>(null);
@@ -118,6 +125,24 @@ export default function CheckoutPage() {
         setDisclosure(null);
         setDisclosureFailed(true);
       });
+    client
+      .listCheckoutProviders()
+      .then((payload) => {
+        if (cancelled) {
+          return;
+        }
+        setProviders(payload);
+        setProvidersFailed(false);
+        setProviderId(payload[0] ?? null);
+      })
+      .catch(() => {
+        if (cancelled) {
+          return;
+        }
+        setProviders(null);
+        setProvidersFailed(true);
+        setProviderId(null);
+      });
     return () => {
       cancelled = true;
     };
@@ -126,9 +151,14 @@ export default function CheckoutPage() {
   const currency = cartCurrency(lines);
   const disclosureReady = disclosure !== null && disclosure.complete;
   const paymentBlocked =
-    cartIsEmpty || paying || !accepted || disclosureReady === false || currency === null;
+    cartIsEmpty ||
+    paying ||
+    !accepted ||
+    disclosureReady === false ||
+    currency === null ||
+    providerId === null;
 
-  async function startCheckout(payCurrency: string): Promise<void> {
+  async function startCheckout(payCurrency: string, provider: string): Promise<void> {
     const client = CommerceApiClient.fromEnv(locale);
     const returnUrl = new URL(
       localePath(locale, "/checkout/return"),
@@ -140,7 +170,7 @@ export default function CheckoutPage() {
     setPaying(true);
     try {
       const started = await client.startCheckout({
-        provider_id: providerId,
+        provider_id: provider,
         return_url: returnUrl,
         currency: payCurrency,
         lines: lines.map((line) => ({
@@ -184,7 +214,10 @@ export default function CheckoutPage() {
       setAcknowledgementMissing(true);
       return;
     }
-    void startCheckout(payCurrency);
+    if (providerId === null) {
+      return;
+    }
+    void startCheckout(payCurrency, providerId);
   }
 
   /*
@@ -379,48 +412,53 @@ export default function CheckoutPage() {
             {dict["checkout.chooseProvider"]}
           </legend>
           <div className="grid gap-3 sm:grid-cols-2">
-            {PROVIDERS.map((provider) => (
-              <label key={provider.id} className="cursor-pointer">
+            {providersFailed ? (
+              <ErrorState
+                title={dict["common.errorTitle"]}
+                description={dict["common.errorBody"]}
+              />
+            ) : providers === null ? (
+              <Skeleton className="h-16 w-full" />
+            ) : (
+              providers.map((id) => (
+              <label key={id} className="cursor-pointer">
                 <input
                   type="radio"
                   name="provider"
-                  value={provider.id}
-                  checked={providerId === provider.id}
-                  onChange={() => setProviderId(provider.id)}
+                  value={id}
+                  checked={providerId === id}
+                  onChange={() => setProviderId(id)}
                   className="peer sr-only"
                 />
                 <span className="tap-target flex items-center gap-3 rounded-lg border border-line bg-surface p-4 text-ink transition-colors duration-base ease-standard hover:border-line-strong peer-checked:border-accent peer-checked:bg-accent-soft peer-checked:text-accent-strong peer-focus-visible:ring-2 peer-focus-visible:ring-accent-strong">
                   <span
                     aria-hidden="true"
                     className={
-                      providerId === provider.id
+                      providerId === id
                         ? "h-4 w-4 shrink-0 rounded-pill border-4 border-accent"
                         : "h-4 w-4 shrink-0 rounded-pill border border-line-strong"
                     }
                   />
-                  <span className="font-medium">{dict[provider.labelKey]}</span>
+                  <span className="font-medium">{providerLabel(id, dict)}</span>
                 </span>
               </label>
-            ))}
+              ))
+            )}
           </div>
         </fieldset>
       </section>
 
       <Card className="flex flex-col gap-3">
-        <label className="flex items-start gap-3">
-          <input
-            type="checkbox"
-            checked={accepted}
-            onChange={(event) => {
-              setAccepted(event.target.checked);
-              if (event.target.checked) {
-                setAcknowledgementMissing(false);
-              }
-            }}
-            className="mt-0.5 h-5 w-5 shrink-0 accent-accent"
-          />
-          <span className="text-sm text-ink">{dict["checkout.licenceAck"]}</span>
-        </label>
+        <Checkbox
+          label={dict["checkout.licenceAck"]}
+          checked={accepted}
+          onCheckedChange={(checked) => {
+            setAccepted(checked === true);
+            if (checked === true) {
+              setAcknowledgementMissing(false);
+            }
+          }}
+        />
         {acknowledgementMissing ? (
           <p role="alert" className="text-sm text-danger">
             {dict["checkout.licenceAckRequired"]}
