@@ -2,12 +2,18 @@
 
 import { useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { Button, buttonClassName } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 import { Select, type SelectOption } from "@/components/ui/Select";
 import { Sheet } from "@/components/ui/Sheet";
 import type { Dictionary } from "@/lib/i18n";
-import type { CatalogueFilterValues } from "./catalogue-query";
+import {
+  CATALOGUE_PAGE_LIMIT,
+  catalogueQueryString,
+  type CatalogueFilterValues,
+  type CatalogueParams,
+} from "./catalogue-query";
 
 type Props = {
   dict: Dictionary;
@@ -28,6 +34,9 @@ type Props = {
  * kept hidden in the main form still submit, so a search does not silently drop the active
  * filters. The sheet holds its own form with the search term and sort carried as hidden fields
  * so applying a filter never discards them.
+ *
+ * A chosen sort is applied at once: the address stays the state, so the select navigates with
+ * the other active filters carried along instead of reordering the rendered grid in place.
  */
 export function CatalogueFilters({
   dict,
@@ -38,6 +47,7 @@ export function CatalogueFilters({
   values,
 }: Props) {
   const [filtersOpen, setFiltersOpen] = useState(false);
+  const router = useRouter();
 
   const sortOptions: readonly SelectOption[] = [
     { value: "newest", label: dict["catalogue.sortNewest"] },
@@ -46,6 +56,22 @@ export function CatalogueFilters({
     { value: "title_asc", label: dict["catalogue.sortTitleAsc"] },
     { value: "title_desc", label: dict["catalogue.sortTitleDesc"] },
   ];
+
+  /**
+   * Navigates to the same catalogue with the chosen sort and every other active filter kept.
+   * The sort change starts a new result set, so the page resets to the first one.
+   */
+  function applySort(sort: string): void {
+    const params: CatalogueParams = {
+      q: values.q,
+      sort,
+      category: values.category,
+      licence: values.licence,
+      limit: CATALOGUE_PAGE_LIMIT,
+      page: 1,
+    };
+    router.push(`${action}${catalogueQueryString(params, 1)}`);
+  }
 
   return (
     <div className="flex flex-col gap-4">
@@ -70,6 +96,7 @@ export function CatalogueFilters({
             name="sort"
             options={sortOptions}
             defaultValue={values.sort}
+            onChange={(event) => applySort(event.target.value)}
           />
         </div>
 
