@@ -15,6 +15,7 @@ from packages.services.src.commerce.errors import (
     PreviewCoverMissingError,
     PreviewDigestMismatchError,
     PreviewNotFoundError,
+    PreviewNotRenderableError,
     PreviewOriginUnreachableError,
 )
 from packages.services.src.commerce.preview import GoodPreview
@@ -248,13 +249,14 @@ class TestPreviewRefusals:
         await store.upsert_many((candidate,))
         await store.save_entry(build_entry(hashlib.sha256(body).hexdigest()))
 
-        with pytest.raises(PreviewNotFoundError):
+        with pytest.raises(PreviewNotRenderableError):
             await preview.render(CANDIDATE_ID)
 
     @pytest.mark.parametrize(
         'failure',
         [
             PreviewNotFoundError,
+            PreviewNotRenderableError,
             PreviewDigestMismatchError,
             PreviewOriginUnreachableError,
         ],
@@ -270,10 +272,12 @@ class TestPreviewRefusals:
             preview, store, _, _, candidate = build_preview(tmp_path, image)
             await store.upsert_many((candidate,))
             await store.save_entry(build_entry('0' * 64))
-        else:
+        elif failure is PreviewNotRenderableError:
             preview, store, _, _, candidate = build_preview(tmp_path, b'not an image')
             await store.upsert_many((candidate,))
             await store.save_entry(build_entry(hashlib.sha256(b'not an image').hexdigest()))
+        else:
+            preview, _, _, _, _ = build_preview(tmp_path, image)
 
         with pytest.raises(failure) as raised:
             await preview.render(CANDIDATE_ID)

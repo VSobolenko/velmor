@@ -8,6 +8,7 @@ from packages.services.src.commerce.errors import (
     DigestUnavailableError,
     PublicationSourceMismatchError,
 )
+from packages.services.src.commerce.image_payload import ImagePayload
 from packages.services.src.commerce.slugs import ProductSlug
 from packages.services.src.domain.candidate import Candidate
 from packages.services.src.domain.catalogue import CatalogueEntry, CatalogueEntryState
@@ -56,7 +57,9 @@ class PublicationBridge:
     The bridge consults ``PublicationGate.listing_for`` and never calls
     ``decide``: publishability is an input. It does not assign categories or
     delete Saleor products on withdrawal. Every path that ends PUBLISHED obtains
-    a content digest first; an unobtainable digest is a publication refusal.
+    a content digest first; an unobtainable digest is a publication refusal, and
+    so is a payload the platform cannot render, which also withdraws an entry
+    that already advertises a preview the shop cannot produce.
     """
 
     def __init__(
@@ -158,6 +161,8 @@ class PublicationBridge:
         digest_or_refusal = await self._digest_for_publish(candidate)
         if isinstance(digest_or_refusal, PublicationOutcome):
             return digest_or_refusal
+        if not digest_or_refusal.renderable:
+            return await self._when_not_renderable(candidate, existing)
         if existing is None:
             return await self._create_published(
                 candidate, decision, now, digest_or_refusal
@@ -169,6 +174,35 @@ class PublicationBridge:
         return await self._update_published(
             candidate, decision, existing, digest_or_refusal
         )
+
+    async def _when_not_renderable(
+        self, candidate: Candidate, existing: CatalogueEntry | None
+    ) -> PublicationOutcome:
+        """Refuse an unrenderable payload, or withdraw the entry advertising it.
+
+        The reason is built from ``ImagePayload``'s constant rather than written
+        again here, so the message an operator reads cannot drift from the check
+        that produced it. An entry whose payload cannot be rendered is one the
+        shop cannot show, so leaving it published is the defect this change
+        removes; a fetch failure is a different statement about a different thing
+        and is handled in ``_digest_for_publish`` without withdrawing anything.
+        """
+        reason = ImagePayload.NOT_RENDERABLE_REASON
+        if existing is None:
+            return PublicationOutcome(
+                candidate_id=candidate.id,
+                action=PublicationAction.REFUSED,
+                reasons=(reason,),
+                entry=None,
+            )
+        if existing.state is CatalogueEntryState.WITHDRAWN:
+            return PublicationOutcome(
+                candidate_id=candidate.id,
+                action=PublicationAction.UNCHANGED,
+                reasons=(f'{reason}; catalogue already matches: entry is withdrawn',),
+                entry=existing,
+            )
+        return await self._withdraw(candidate, existing, reason)
 
     async def _digest_for_publish(
         self, candidate: Candidate

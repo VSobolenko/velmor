@@ -32,6 +32,7 @@ from packages.services.src.commerce.errors import (
     PreviewCoverMissingError,
     PreviewDigestMismatchError,
     PreviewNotFoundError,
+    PreviewNotRenderableError,
     PreviewOriginUnreachableError,
 )
 from packages.services.src.commerce.grants import DeliveryGrantService
@@ -112,13 +113,19 @@ class ApiApplication:
         'http://127.0.0.1:3000',
     )
     BASE_PROVIDER_IDS = ('stripe', 'bepaid')
-    #: The documented preview refusals and the status each maps to (contract.md,
-    #: GET /catalogue/goods/{candidate_id}/preview). A cover whose bytes are gone
-    #: is 500: we wrote that row and the bytes went missing from our own cache, so
-    #: the fault is our inconsistent state and not an upstream one, and 502 would
-    #: send an operator to inspect an origin that is fine. It stays registered
-    #: rather than falling through to the default handler so the body is fixed and
-    #: names no origin. Re-running "velmor cover" repairs it.
+    #: The documented preview refusals and the status each maps to
+    #: (openspec/specs/commerce/storefront; contract.md, GET
+    #: /catalogue/goods/{candidate_id}/preview). 404 keeps one meaning - no
+    #: saleable good here: unknown, withdrawn or not PAID_OK - and a preview that
+    #: could not be produced is 502, whether the origin was unreachable or served
+    #: a payload the platform cannot render. Two 502 causes sharing one status is
+    #: deliberate: the operator's separating signal is the publication refusal
+    #: reason, and no response body may describe the origin's bytes. A cover whose
+    #: bytes are gone is 500: we wrote that row and the bytes went missing from our
+    #: own cache, so the fault is our inconsistent state and not an upstream one,
+    #: and 502 would send an operator to inspect an origin that is fine. It stays
+    #: registered rather than falling through to the default handler so the body is
+    #: fixed and names no origin. Re-running "velmor cover" repairs it.
     PREVIEW_REFUSALS: dict[type[VelmorError], tuple[int, str]] = {
         PreviewNotFoundError: (404, 'no preview exists for this good'),
         PreviewDigestMismatchError: (
@@ -126,6 +133,7 @@ class ApiApplication:
             'the file no longer matches the recorded digest',
         ),
         PreviewOriginUnreachableError: (502, 'the preview could not be produced'),
+        PreviewNotRenderableError: (502, 'the preview could not be produced'),
         PreviewCoverMissingError: (500, 'the preview could not be produced'),
     }
 
@@ -313,13 +321,14 @@ class ApiApplication:
     async def _get_good_preview(self, candidate_id: str) -> Response:
         """Serve the bytes a product card or page shows for a good.
 
-        A refusal is not handled here. ``GoodPreview.render`` reports one of four
-        documented errors (contract.md, GET /catalogue/goods/{candidate_id}/preview)
-        and ``PREVIEW_REFUSALS`` maps each to the status code that file fixes,
-        registered as an exception handler in ``build``. Writing the mapping as a
-        table rather than as a chain of ``except`` clauses means the route has no
-        catch in it at all, and an error that reaches the default handler is a
-        programming mistake rather than a buyer-visible state.
+        A refusal is not handled here. ``GoodPreview.render`` reports one of five
+        documented errors (openspec/specs/commerce/storefront; contract.md, GET
+        /catalogue/goods/{candidate_id}/preview) and ``PREVIEW_REFUSALS`` maps each
+        to the status code that contract fixes, registered as an exception handler
+        in ``build``. Writing the mapping as a table rather than as a chain of
+        ``except`` clauses means the route has no catch in it at all, and an error
+        that reaches the default handler is a programming mistake rather than a
+        buyer-visible state.
         """
         image = await self._preview.render(candidate_id)
         return Response(

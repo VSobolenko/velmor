@@ -250,14 +250,39 @@ class TestPreviewRefusals:
 
         assert harness.get().status_code == 404
 
-    async def test_a_payload_that_is_not_an_image_is_404(self, tmp_path: Path) -> None:
+    async def test_a_payload_that_is_not_an_image_is_502(self, tmp_path: Path) -> None:
         harness = PreviewHarness(tmp_path, b'this is not an image')
         await harness.stock(build_entry(harness.body))
 
         response = harness.get()
 
-        assert response.status_code == 404
+        assert response.status_code == 502
         assert ORIGIN_URL not in response.text
+
+    async def test_a_refused_payload_is_distinguishable_from_an_absent_good(
+        self, tmp_path: Path
+    ) -> None:
+        absent = PreviewHarness(tmp_path / 'absent', build_image(400, 300, 'navy'))
+        unrenderable = PreviewHarness(tmp_path / 'unrenderable', b'this is not an image')
+        await unrenderable.stock(build_entry(unrenderable.body))
+
+        assert absent.get().status_code == 404
+        assert unrenderable.get().status_code == 502
+
+    async def test_the_refusal_bodies_are_fixed_and_name_no_origin(
+        self, tmp_path: Path
+    ) -> None:
+        absent = PreviewHarness(tmp_path / 'absent', build_image(400, 300, 'navy'))
+        unrenderable = PreviewHarness(tmp_path / 'unrenderable', b'this is not an image')
+        await unrenderable.stock(build_entry(unrenderable.body))
+
+        absent_response = absent.get()
+        refused_response = unrenderable.get()
+
+        assert absent_response.json() == {'detail': 'no preview exists for this good'}
+        assert refused_response.json() == {'detail': 'the preview could not be produced'}
+        assert ORIGIN_URL not in absent_response.text
+        assert ORIGIN_URL not in refused_response.text
 
     async def test_origin_bytes_that_moved_are_409(self, tmp_path: Path) -> None:
         harness = PreviewHarness(tmp_path, build_image(400, 300, 'crimson'))

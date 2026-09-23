@@ -6,13 +6,19 @@ import httpx
 
 from packages.services.src.commerce.asset_cache import AssetCache
 from packages.services.src.commerce.errors import DigestUnavailableError
+from packages.services.src.commerce.image_payload import ImagePayload
 from packages.services.src.domain.digest import DigestResult
 
 DIGEST_ALGORITHM = 'sha256'
 
 
 class ContentDigest:
-    """Obtain a SHA-256 digest of the origin file, caching small payloads."""
+    """Obtain a SHA-256 digest of the origin file, caching small payloads.
+
+    The bytes are fetched once, hashed and identified in the same pass, so the
+    digest recorded for an entry is always the digest of the payload the
+    renderability answer was computed from.
+    """
 
     def __init__(self, http: httpx.AsyncClient, cache: AssetCache) -> None:
         self._http = http
@@ -44,7 +50,12 @@ class ContentDigest:
         body = response.content
         digest = hashlib.sha256(body).hexdigest()
         size_bytes = len(body)
+        renderable = ImagePayload.can_render(body)
         if size_bytes <= self._cache.max_bytes:
             self._cache.put(digest, body)
-            return DigestResult(digest=digest, size_bytes=size_bytes, cached=True)
-        return DigestResult(digest=digest, size_bytes=size_bytes, cached=False)
+            return DigestResult(
+                digest=digest, size_bytes=size_bytes, cached=True, renderable=renderable
+            )
+        return DigestResult(
+            digest=digest, size_bytes=size_bytes, cached=False, renderable=renderable
+        )

@@ -5,7 +5,7 @@ import io
 from PIL import Image, features
 
 from packages.services.src.commerce.asset_cache import AssetCache
-from packages.services.src.commerce.errors import PreviewNotFoundError
+from packages.services.src.commerce.image_payload import ImagePayload
 
 
 class PreviewDerivative:
@@ -22,10 +22,14 @@ class PreviewDerivative:
     ``MAX_EDGE`` is 1024: a product card is at most a few hundred CSS pixels
     wide, and a card image drawn at twice that on a dense display still fits
     inside 1024 without being downscaled again by the browser.
+
+    The decode, the pixel bound and the refusal live in ``ImagePayload``: this
+    class owns what is its own - the target format, the alpha decision for WebP
+    versus JPEG, the downscale, the encode and the cache - so the predicate
+    publication uses is the predicate the preview uses.
     """
 
     MAX_EDGE = 1024
-    MAX_DECODE_PIXELS = 64_000_000
     QUALITY = 82
     DIRECTORY = 'previews'
     WEBP_MEDIA_TYPE = 'image/webp'
@@ -72,30 +76,14 @@ class PreviewDerivative:
         return encoded
 
     def encode(self, body: bytes) -> bytes:
-        """The downscaled, encoded bytes for a decodable image.
+        """The downscaled, encoded bytes for a renderable image.
 
-        Pillow documents that ``Image.open`` raises ``UnidentifiedImageError``, an
-        ``OSError`` subclass, when "the image cannot be opened and identified"
-        (Pillow reference, Image module), and raises ``OSError`` for a payload
-        truncated while decoding. It also raises ``DecompressionBombError``, a
-        plain ``Exception``, when an image declares more than twice
-        ``Image.MAX_IMAGE_PIXELS``; that class is named separately because it is
-        not an ``OSError``. The contract makes every one of them a refusal - a
-        preview request falls back to the storefront's own placeholder - so
-        translating them is the logic here rather than a catch that hides a
-        failure. No predicate answers "is this a decodable image" without
-        attempting the decode, and sniffing magic bytes by hand would refuse
-        formats Pillow handles.
+        Everything about whether ``body`` can be decoded - the bound, Pillow's
+        raises and the refusal - belongs to ``ImagePayload.frame``, which is the
+        same call the publication path makes, so a payload this method encodes is
+        one publication would have accepted.
         """
-        try:
-            with Image.open(io.BytesIO(body)) as opened:
-                if opened.width * opened.height > self.MAX_DECODE_PIXELS:
-                    raise PreviewNotFoundError('the payload is not a decodable image')
-                prepared = self._prepared(opened)
-        except Image.DecompressionBombError as error:
-            raise PreviewNotFoundError('the payload is not a decodable image') from error
-        except OSError as error:
-            raise PreviewNotFoundError('the payload is not a decodable image') from error
+        prepared = self._prepared(ImagePayload.frame(body))
         prepared.thumbnail((self.MAX_EDGE, self.MAX_EDGE), Image.Resampling.LANCZOS)
         buffer = io.BytesIO()
         prepared.save(buffer, format=self._format(), quality=self.QUALITY)
@@ -111,18 +99,18 @@ class PreviewDerivative:
         """
         return f'{digest}-{cls.MAX_EDGE}'
 
-    def _prepared(self, opened: Image.Image) -> Image.Image:
+    def _prepared(self, frame: Image.Image) -> Image.Image:
         """The frame to encode, with the alpha WebP can carry and JPEG cannot.
 
         A transparent PNG flattened straight to RGB comes out black where it was
         transparent, which on a catalogue card reads as a broken image.
         """
-        transparent = 'A' in opened.getbands() or (
-            opened.mode == 'P' and 'transparency' in opened.info
+        transparent = 'A' in frame.getbands() or (
+            frame.mode == 'P' and 'transparency' in frame.info
         )
         if transparent and self.media_type == self.WEBP_MEDIA_TYPE:
-            return opened.convert('RGBA')
-        return opened.convert('RGB')
+            return frame.convert('RGBA')
+        return frame.convert('RGB')
 
     def _format(self) -> str:
         if self.media_type == self.WEBP_MEDIA_TYPE:

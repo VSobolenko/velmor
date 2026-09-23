@@ -6,6 +6,7 @@ import pytest
 
 from packages.services.src.commerce.category_service import CategoryService
 from packages.services.src.commerce.errors import CategoryNotFoundError
+from packages.services.src.commerce.image_payload import ImagePayload
 from packages.services.src.commerce.publication import (
     PublicationBridge,
     PublicationSourceMismatchError,
@@ -45,9 +46,11 @@ class FakeDigest:
         self,
         digest: str = REAL_DIGEST,
         *,
+        renderable: bool = True,
         error: Exception | None = None,
     ) -> None:
         self.digest = digest
+        self.renderable = renderable
         self.error = error
         self.urls: list[str] = []
 
@@ -57,7 +60,12 @@ class FakeDigest:
         self.urls.append(download_url)
         if self.error is not None:
             raise self.error
-        return DigestResult(digest=self.digest, size_bytes=12, cached=False)
+        return DigestResult(
+            digest=self.digest,
+            size_bytes=12,
+            cached=False,
+            renderable=self.renderable,
+        )
 
 
 class FakeSaleor:
@@ -215,6 +223,18 @@ def bridge(
     store: InMemoryStore,
     digest: FakeDigest,
 ) -> PublicationBridge:
+    return PublicationBridge(
+        gate=gate, saleor=saleor, entries=store, categories=store, digest=digest
+    )
+
+
+def bridge_over_digest(
+    gate: PublicationGate,
+    saleor: FakeSaleor,
+    store: InMemoryStore,
+    digest: FakeDigest,
+) -> PublicationBridge:
+    """A bridge over a digest that answers renderability or failure deliberately."""
     return PublicationBridge(
         gate=gate, saleor=saleor, entries=store, categories=store, digest=digest
     )
@@ -617,6 +637,119 @@ class TestPublicationBridge:
             await bridge.apply(candidate, decision, spec, NOW)
 
         assert saleor.calls == []
+
+
+class TestUnrenderablePayload:
+    """A payload the platform cannot render: refuse, or withdraw what advertises it."""
+
+    async def test_with_no_entry_the_good_is_refused_with_the_reason(
+        self,
+        gate: PublicationGate,
+        saleor: FakeSaleor,
+        store: InMemoryStore,
+        candidate: Candidate,
+        spec: SourceSpec,
+    ) -> None:
+        bridge = bridge_over_digest(gate, saleor, store, FakeDigest(renderable=False))
+
+        outcome = await bridge.apply(candidate, publishable_decision(), spec, NOW)
+
+        assert outcome.action is PublicationAction.REFUSED
+        assert outcome.entry is None
+        assert await store.by_candidate(candidate.id) is None
+        assert outcome.reasons != ()
+        assert ImagePayload.NOT_RENDERABLE_REASON in outcome.reasons[0]
+        assert candidate.download_url not in outcome.reasons[0]
+        assert saleor.calls == []
+
+    async def test_a_published_entry_is_withdrawn_with_the_reason(
+        self,
+        gate: PublicationGate,
+        saleor: FakeSaleor,
+        store: InMemoryStore,
+        candidate: Candidate,
+        spec: SourceSpec,
+    ) -> None:
+        await store.save_entry(published_entry())
+        bridge = bridge_over_digest(gate, saleor, store, FakeDigest(renderable=False))
+
+        outcome = await bridge.apply(candidate, publishable_decision(), spec, NOW)
+
+        assert outcome.action is PublicationAction.WITHDRAWN
+        assert outcome.entry is not None
+        assert outcome.entry.state is CatalogueEntryState.WITHDRAWN
+        assert outcome.entry.withdrawal_reason is not None
+        assert await store.by_candidate(candidate.id) == outcome.entry
+        assert outcome.reasons != ()
+        assert ImagePayload.NOT_RENDERABLE_REASON in outcome.reasons[0]
+        assert candidate.download_url not in outcome.reasons[0]
+        assert saleor.calls == []
+
+    async def test_an_already_withdrawn_entry_is_unchanged(
+        self,
+        gate: PublicationGate,
+        saleor: FakeSaleor,
+        store: InMemoryStore,
+        candidate: Candidate,
+        spec: SourceSpec,
+    ) -> None:
+        existing = withdrawn_entry()
+        await store.save_entry(existing)
+        bridge = bridge_over_digest(gate, saleor, store, FakeDigest(renderable=False))
+
+        outcome = await bridge.apply(candidate, publishable_decision(), spec, NOW)
+
+        assert outcome.action is PublicationAction.UNCHANGED
+        assert outcome.entry is not None
+        assert outcome.entry.state is CatalogueEntryState.WITHDRAWN
+        assert outcome.entry.withdrawal_reason == existing.withdrawal_reason
+        assert outcome.reasons != ()
+        assert ImagePayload.NOT_RENDERABLE_REASON in outcome.reasons[0]
+        assert candidate.download_url not in outcome.reasons[0]
+        assert saleor.calls == []
+
+    async def test_unrenderable_withdraws_while_unobtainable_leaves_published(
+        self,
+        gate: PublicationGate,
+        saleor: FakeSaleor,
+        store: InMemoryStore,
+        spec: SourceSpec,
+    ) -> None:
+        """The two refusal causes are distinguishable in one pass.
+
+        A payload we cannot render is a fact about bytes we hold, so the entry
+        that advertises it goes; an origin we cannot fetch is a statement about
+        the origin, so the entry is left as it was.
+        """
+        from packages.services.src.commerce.errors import DigestUnavailableError
+
+        await store.save_entry(published_entry(candidate_id='openverse:1'))
+        await store.save_entry(published_entry(candidate_id='openverse:2'))
+        unrenderable = bridge_over_digest(
+            gate, saleor, store, FakeDigest(renderable=False)
+        )
+        unobtainable = bridge_over_digest(
+            gate,
+            saleor,
+            store,
+            FakeDigest(error=DigestUnavailableError('origin returned HTTP 404')),
+        )
+
+        withdrawn = await unrenderable.apply(
+            build_candidate(candidate_id='openverse:1'), publishable_decision(), spec, NOW
+        )
+        refused = await unobtainable.apply(
+            build_candidate(candidate_id='openverse:2'), publishable_decision(), spec, NOW
+        )
+
+        assert withdrawn.action is PublicationAction.WITHDRAWN
+        assert refused.action is PublicationAction.REFUSED
+        remained_withdrawn = await store.by_candidate('openverse:1')
+        remained_published = await store.by_candidate('openverse:2')
+        assert remained_withdrawn is not None
+        assert remained_withdrawn.state is CatalogueEntryState.WITHDRAWN
+        assert remained_published is not None
+        assert remained_published.state is CatalogueEntryState.PUBLISHED
 
 
 class TestPublicationOutcomeModel:

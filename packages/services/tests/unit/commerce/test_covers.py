@@ -14,7 +14,7 @@ from packages.services.src.commerce.derivative import PreviewDerivative
 from packages.services.src.commerce.errors import (
     CatalogueEntryNotFoundError,
     CoverRefusedError,
-    PreviewNotFoundError,
+    PreviewNotRenderableError,
 )
 from packages.services.src.domain.catalogue import CatalogueEntry, CatalogueEntryState
 from packages.services.src.domain.license import StorefrontListing
@@ -216,7 +216,7 @@ class TestCoverRefusals:
         await store.upsert_many((build_candidate(candidate_id=CANDIDATE_ID),))
         await store.save_entry(build_entry())
 
-        with pytest.raises(PreviewNotFoundError):
+        with pytest.raises(PreviewNotRenderableError):
             await attacher.attach(
                 CANDIDATE_ID,
                 write_image(tmp_path, b'this is not an image'),

@@ -52,12 +52,17 @@ class CheckoutRefusedError(VelmorError):
 
 
 class PreviewNotFoundError(VelmorError):
-    """No preview exists for this good: unknown, withdrawn, or not decodable.
+    """No preview exists for this good: unknown, withdrawn, or not PAID_OK.
 
-    One error for the three cases on purpose. The buyer's page shows its own
-    placeholder whichever it is, and telling a caller apart "no such good" from
-    "not an image" would describe the origin, which concealment forbids.
+    Narrowed deliberately to the cases where no saleable good exists at that
+    address. A payload the platform cannot render is
+    ``PreviewNotRenderableError``: the good is present and saleable, and the
+    operator must be able to tell the two apart.
     """
+
+
+class PreviewNotRenderableError(VelmorError):
+    """The payload is not one the platform can render; the message must not name the origin."""
 
 
 class PreviewDigestMismatchError(VelmorError):
