@@ -14,9 +14,10 @@ Delete this file, and the one-line pointer to it in `AGENTS.md`, when the brief 
 
 ## 1. Where the work stands
 
-Repository: branch `feat/add-storefront-commerce`, working tree clean, HEAD `d64c5c5`.
+Repository: branch `feat/add-storefront-commerce`, HEAD `370f2233` (corrected 2026-09-24; this brief
+was written against `d64c5c5` and every commit reference below was re-checked against the tree).
 
-Deployed: the host checks out branch `deploy-74` at `/opt/velmor/app`, currently at `0ee8208`.
+Deployed: the host checks out branch `deploy-74` at `/opt/velmor/app`, currently at `370f2233`.
 `velmor-storefront` and `velmor-api` are both `active`.
 
 Live shop: `https://shop.78-111-89-46.sslip.io`. Verified just now: `/en`, `/ru`, `/be`,
@@ -30,24 +31,61 @@ publication, the storefront (browse, search, filters, product page, cart, checko
 downloads), the print-room identity with generated imagery, three localised languages chosen by the
 browser, and a curated subset of the catalogue showing category tiles.
 
-Three OpenSpec changes are open, and all three pass `openspec validate --strict`:
+Four OpenSpec changes are open, and all four pass `openspec validate --strict`:
 
 | Change | Progress | Meaning |
 |---|---|---|
 | `redesign-storefront-ux` | 0/55 marked | The work is built and deployed; the boxes were never ticked |
 | `rebrand-print-room` | 0/38 marked | Same |
-| `localise-category-taxonomy` | 0/12 marked | Planned only, not started |
+| `localise-category-taxonomy` | 0/12 marked | **Built and deployed in `5f9efd4`**, which lands after the proposal commit `d64c5c5`; the boxes were never ticked either |
+| `refuse-unrenderable-origins` | 12/12 marked | Built and deployed, tasks closed in `b0bdd13`; its two delta specs are still not merged, so it is a fourth change waiting on B |
+
+Re-verified 2026-09-24 with `node scripts/harness-status.mjs`: those four, and
+`openspec validate --strict --all: 11 passed, 0 failed (11 items)`. The count was three when this
+brief was written; `refuse-unrenderable-origins` had been left out of it.
 
 ## 2. What remains, in order
 
-Do them in this order. A depends on nothing. B is documentation and unblocks the contract. C depends
-on A. D is independent. E depends on A.
+Do them in this order. The unlettered "First" item comes before all of them and depends on nothing. A
+and B are now documentation: A's implementation has already landed, so nothing in this list waits on
+A. C and D are independent. E depends on A, which is satisfied - the taxonomy fix is deployed, so the
+curation pass can run whenever.
 
-### A. Implement `localise-category-taxonomy` (12 tasks)
+### First: fix the language of the cart and checkout line titles (one Codex worker)
 
-This is the only new implementation work. It is fully planned: read
-`openspec/changes/localise-category-taxonomy/` - `proposal.md`, `design.md`, `specs/`, `tasks.md` -
-and follow the tasks. `tasks.md` carries the verification for each.
+The prompt is written and waiting: `harness/codex/prompts/ux-cart-line-locale.md`. Nothing is
+implemented. Run it as the first worker once the Codex quota resets - it is the only defect found on
+the buyer surface that is not yet fixed.
+
+A line in the cart and in the checkout shows a good's title in the language the good was **added**
+in, not the language the buyer is reading. Measured on `/en/cart` at `370f2233`: the page states
+`lang="en"` and its chrome is English (`Cart`, `Subtotal`, `each`, `Remove`), while its five lines
+carried four Russian titles and one Belarusian, the Belarusian one added from `/be` seconds earlier.
+The same good is titled `Hotel Ca' Sagredo on the Grand Canal, Venice` on `/en/goods/...`, so the
+requested language's text exists and is simply not reached. Cause: `storefront/src/lib/cart.ts` stores
+a `title` snapshot written at add time and never recomputed. This breaks "The shop is served in the
+buyer's language"; the fallback scenario in
+`openspec/changes/redesign-storefront-ux/specs/commerce/storefront/spec.md` permits a good's Russian
+text only when the requested language's text is absent, which is not this case.
+
+### A. Close `localise-category-taxonomy` rather than rebuild it
+
+**The implementation already landed.** `5f9efd4 feat(curation): localise category names per served
+language` is in this history and comes after `d64c5c5 docs(openspec): propose
+localise-category-taxonomy`. This brief previously called the change "planned only, not started" and
+"the only new implementation work", which was false and would have had you rebuild shipped code. Do
+not rebuild it. What is open is the same shape as B: mark the twelve boxes per evidence, merge the
+delta spec into `openspec/specs/`, and archive. Read `proposal.md`, `design.md`, `specs/` and
+`tasks.md` in `openspec/changes/localise-category-taxonomy/` to judge it - `tasks.md` carries the
+verification for each task, and these four are the ones a green suite cannot evidence, so check them
+hardest:
+
+- 4.1 and 4.2 - rendered screenshots in every language at desktop and mobile width, and `/ux-verify`.
+- 5.1 and 5.2 - the curation pass over the whole catalogue, and the three-name check against the
+  deployed build.
+
+Everything else there is service-side, and `uv run python -m pytest packages -q` with
+`openspec validate --strict` covers it.
 
 Two things the change does not record, and you need both:
 
@@ -60,14 +98,21 @@ Two things the change does not record, and you need both:
   must be read **per proposal**, not once per run, because `fill_missing` creates categories while it
   loops and a snapshot goes stale within the first two goods.
 
-### B. Close the contract for the two shipped changes
+### B. Close the contract for the shipped changes
 
-Both shipped changes are validated but unarchived, so `openspec/specs/` is behind the code. Verified:
-`openspec/specs/commerce/storefront/spec.md` still says only "the goods in that category are listed",
+Four changes are validated but unarchived, so `openspec/specs/` is behind the code. Verified
+2026-09-24: `openspec/specs/commerce/storefront/spec.md` still says only "the goods in that category
+are listed",
 and carries no requirement about product cards, imagery, locale routing, or designed page states. All
 of those requirements exist in the delta at
 `openspec/changes/redesign-storefront-ux/specs/commerce/storefront/spec.md` and have never been
 merged. That is the same gap through which the shop once shipped as a list of source filenames.
+
+The sync-and-archive step below applies to all four changes, not only the two with a ledger here.
+`refuse-unrenderable-origins` carries two delta specs (`commerce/catalog-publication` and
+`commerce/storefront`) and its twelve boxes are already ticked, so it needs only the merge, the
+archive and a re-validation. `localise-category-taxonomy`'s ledger is in A above; both it and
+`rebrand-print-room` have their own `tasks.md` verification text.
 
 Per-change ledger so you can mark the boxes honestly instead of trusting a number. Group letters are
 the task groups in each `tasks.md`.
@@ -172,13 +217,22 @@ whole catalogue, which is exactly what A fixes.
 
 ## 3. Honest statement of what is not known
 
-- Whether the `be` locale reads correctly on every page. It was checked on the home page only.
-- Whether every page renders correctly at mobile width. Only the home page and one product page were
-  looked at on a phone viewport.
-- Whether `/rights-verify` would pass. It has not been run over this work.
-- Whether the storefront skill's checklist matches the shipped surface. Not audited.
+- Closed on 2026-09-24 against the deployed `370f2233`, at 390 px: the `be` home, cart, account and
+  product pages, plus `/be/no-such-page`. Every one: header 65 px with no child escaping its box,
+  zero overlapping text, zero controls under 44 px, no horizontal overflow, and text in Belarusian
+  ("Кошык", "У кошык", "Правы на загрузку", "Старонка не знойдзена"). The account cards are
+  whole-card links at 301x44. `/be/no-such-page` answers HTTP 404 with the skip link present. The
+  `be` home carries 13 images and none failed once the page was scrolled in steps.
+- Still unverified, and do not read it as working: `/be` on the catalogue, a category page and the
+  checkout, and every page at 1440 px in `be`. The `en` locale was measured only through the cart and
+  the checkout.
+- Still open: whether `/rights-verify` would pass. It has not been run over this work.
+- Still open: whether the storefront skill's checklist matches the shipped surface. Not audited.
+- Still open: the mobile menu and search drawer, and a completed purchase, were never driven. The
+  purchase path was walked end to end in an earlier session with the stub provider; nothing was bought
+  in this one.
 
-Treat the first two as unverified, not as working.
+Everything below the "Closed" line is unverified, not working.
 
 ## 4. Facts that cost time to discover
 

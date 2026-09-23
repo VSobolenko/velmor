@@ -576,3 +576,48 @@ defect the next time", so the fix class matters more than the narrative.
   `.mjs`/`.cjs`/`.js` file and fails the run, and the BOM was stripped from `selftest.mjs`. The
   check is a byte comparison rather than a `node --check` spawn, so it costs no processes and names
   the offending file.
+
+### 2026-09-24 - every `.sh` in the working tree is CRLF, so a copied deploy script dies on the host
+
+- Symptom: `bash /root/deploy-storefront.sh` on the host answered `set: invalid option` at line 13,
+  `$'\r': command not found` at line 14, and `cd: $'/opt/velmor/app\r': No such file or directory`.
+  The same file is `ASCII text` with an LF entry in the index, and `git status` reports it clean.
+- Root cause: `.gitattributes` sets `*.sh text eol=lf` and the index is LF, but the **working tree**
+  copy is CRLF. A file written on Windows by an editor or an agent write tool lands with CRLF, and
+  Git never renormalises it because the normalised content compares equal to the index - so the tree
+  stays clean and the defect is invisible to every gate. 24 of the 30 shell scripts under `.deploy/`
+  are in that state. A copy step ships the working-tree bytes, not the index, so the defect travels
+  with `scp`. `HANDOFF.md` already recorded the workaround ("ship scripts with `tr -d '\r'`"), but as an
+  instruction rather than as a cause, which is why it had to be rediscovered.
+- Fix class: process now, sensor later. Run a shell script from the host's own git checkout - the
+  checkout applies `eol=lf` and is LF by construction - instead of copying a working-tree file. A
+  check over tracked `*.sh` for CRLF bytes belongs in `scripts/selftest.mjs` beside the BOM check; it
+  is named here and deliberately not written yet.
+- Evidence: `git ls-files --eol .deploy/deploy-storefront.sh` reports `i/lf w/crlf attr/text eol=lf`.
+  A byte scan of the 30 shell scripts under `.deploy/` found CRLF in 24; the six clean ones are
+  `deploy-74b.sh`, `deploy-saleor.sh`, `e2e-purchase.sh`, `firewall-loopback-services.sh`,
+  `run-e2e-74.sh` and `run-e2e-74b.sh`. After `sed -i 's/\r$//' /root/deploy-storefront.sh` the same command reported
+  `=== storefront dependencies ===`, `build exit=0 in 11s` and `active`.
+- Change made: the deploy completed after normalising the host copy. No repository file changed; this
+  entry is the record. The first script that fails this way again earns the sensor.
+
+### 2026-09-24 - a jump-scroll counted five healthy product images as broken
+
+- Symptom: a scan of `/be` at 390 px reported `images: {total: 13, broken: 5}` - five cards holding a
+  356x445 media box with `naturalWidth: 0`, `complete: false` and `currentSrc: ""`. It read as five
+  broken tiles stacked on the live home page, and it was one step away from being filed as a defect
+  against a shop that was working.
+- Root cause: the scan scrolled to `document.body.scrollHeight` in one jump. Native lazy loading loads
+  what is near the *current* viewport, so jumping straight past the middle of a 9125 px document never
+  brought those five images into range. They were healthy: the same preview URLs answer
+  `200 image/webp`.
+- Fix class: method. Scroll in steps of a few hundred pixels and let each step settle before counting.
+  A jump-scroll is still acceptable once every step has been visited, so a page already walked can be
+  re-counted cheaply.
+- Evidence: with the jump, `brokenBeforeScroll: 5`, `brokenAfterFullScroll: 5`, `brokenAfterReturn: 5`,
+  and all five carried `loading="lazy"`. With steps of 500 px and a 450 ms settle the same run ended
+  `stillUnloaded: 0`. `curl` on those preview URLs returned `status=200 type=image/webp bytes=70154`
+  and `bytes=160664`, against `bytes=165270` for an image that had loaded.
+- Change made: none; this is a method note. The reason it is worth one: rule 08 already says a false
+  positive is worse than a miss, and this one would have cost a session of work defending a working
+  surface.
