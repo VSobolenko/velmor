@@ -10,8 +10,10 @@ is a unit one implementer can finish and a reviewer can judge on its own.
       `@theme inline`. Keep `--color-line` for decorative dividers and add
       `--color-line-strong` for control boundaries.
 - [ ] 1.2 Switch the font pair in `storefront/src/app/layout.tsx` to Playfair Display (display)
-      and Inter (body), both with the `latin`, `cyrillic` and `cyrillic-ext` subsets, exposed as
-      `--font-display` and `--font-body`.
+      and Inter (body), exposed as `--font-display` and `--font-body`. Inter takes the `latin`,
+      `cyrillic` and `cyrillic-ext` subsets. Playfair Display does not offer `cyrillic-ext` and
+      requesting it fails the build, so it takes `latin` and `cyrillic` only; its `cyrillic` subset
+      covers the Belarusian characters.
 - [ ] 1.3 Add the display scale, the radius scale and the spacing rhythm as theme values, so a
       page composes from named steps instead of ad-hoc utilities.
 - [ ] 1.4 Record the computed contrast ratio of every pairing the token set is used in, in the
@@ -30,7 +32,7 @@ is a unit one implementer can finish and a reviewer can judge on its own.
       background used behind the hero band. The weave SHALL NOT be placed behind body text at a
       higher opacity.
 - [ ] 2.4 Implement `storefront/src/components/brand/HallmarkBadge.tsx` for the licence and
-      verification cue, using the `seal-soft` and `seal-strong` tokens.
+      verification cue, using the `accent-soft` and `accent-strong` tokens.
 
 ## 3. Radix primitives behind our own components
 
@@ -57,8 +59,10 @@ Radix directly is a review finding.
 - [ ] 4.1 `Button`: variants for primary, secondary, ghost, danger and a link-styled action;
       sizes; a pending state that is not a spinner glued on top; correct disabled semantics.
       Primary is the filled seal button; a page has at most one per view.
-- [ ] 4.2 `Card`, `Badge`, `PriceTag`, `Input`, `Textarea`, `Field` with an error state, and
-      `Select`, all rebuilt against the tokens and audited for label wiring.
+- [ ] 4.2 `Card`, `Badge`, `PriceTag`, `Input`, `Textarea` with an error state, and `Select`, all
+      rebuilt against the tokens and audited for label wiring. The error state is a prop on the
+      control, wired to `aria-invalid`, `aria-describedby` and a `role="alert"` message; it is not a
+      separate wrapper component.
 - [ ] 4.3 `PriceTag` renders a price with the currency in the muted token and the amount in the
       display face, so a price reads as a price.
 - [ ] 4.4 `Skeleton`, `EmptyState`, `ErrorState`, `NotFoundState` as one family, each taking an

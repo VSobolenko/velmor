@@ -41,10 +41,11 @@ may influence it. A model may propose evidence; it never returns a verdict.
 velmor/                     composition root: CLI, container, agent adapters
 packages/
   core/                     bootstrap, settings, observability, fs guard, errors
-  services/                 domain models, rights engine, connectors, persistence
+  services/                 domain models, rights engine, connectors, commerce, persistence
   scout/                    agent: discovers candidate goods (plain Python)
   auditor/                  agent: verifies rights, decides (LangGraph)
-  api/                      FastAPI surface (B2B verify, webhooks, health)
+  api/                      FastAPI commerce surface (catalogue, checkout, account, webhooks, downloads)
+storefront/                 Next.js Proofbasket UI; presentation only
 openspec/                   spec-driven change contracts (proposal -> tasks -> archive)
 .agents/skills/             installed skill collections
 .cursor/                    rules, hooks, commands, skills, MCP config
@@ -63,8 +64,8 @@ scripts/setup-mcp.mjs       verify every MCP server resolves on this machine
 | Agents | LangGraph for graph control flow, Pydantic AI for one extraction at a time, DeepAgents for long-horizon research (not used yet) |
 | Observability | Logfire traces, OpenInference instrumentors, Langfuse for LLM observability |
 | CLI | typer |
-| Storefront | Saleor (planned) |
-| Payments | Stripe (planned) |
+| Storefront | Saleor GraphQL via `httpx`, behind a Next.js Proofbasket UI (`storefront/`) |
+| Payments | Stripe and bePaid; checkout re-verifies the gate outcome at payment time |
 
 Wiring is explicit in `velmor/container.py`. There is no dependency-injection
 framework: every dependency is a plain constructor argument, so reading that file
@@ -75,17 +76,24 @@ is enough to learn what a process is made of.
 Implemented: the rights engine (with tests), domain models, screening, source
 registry and credentials, the Openverse connector, persistence, the Pydantic AI
 license interpreter, the scout ingest job, the auditor graph with its nodes and
-routing, the CLI and the container.
+routing, the CLI and the container. On top of that, the commerce layer: catalogue
+entries and presentations, categories, publication to Saleor, entitlements and
+orders, payment providers with payment-time re-verification, downloads behind
+short-lived grants, the FastAPI commerce surface, and the Next.js storefront.
 
 The vertical slice is walkable end to end: discovery selects candidates, screening
-removes prohibited goods, the graph verifies the rest, the gate decides, and the run
-reports every outcome - published, refused, screened out or paused. It is proven by
-a path test with a fake source, page fetch and interpreter, not by a live run.
+removes prohibited goods, the graph verifies the rest, the gate decides, the good is
+published, and a buyer can browse, pay and download it. A demo deployment runs at
+`https://shop.78-111-89-46.sslip.io/`.
 
-Not yet implemented: Saleor and Stripe integration, the FastAPI routers, delivering
-a human ruling back into a paused run, Docker images, and the tests for the store,
-the connectors and the API. See `AGENTS.md` for the exact state before assuming
-something works.
+Not yet implemented: live Stripe and bePaid credentials and production
+legal-entity disclosure (demo and stub paths are what is proven), delivering a
+human ruling back into a paused run, the B2B verify API as the main surface,
+category curation of the whole catalogue, and type checking as a gate. `AGENTS.md`
+states the exact position, and `HANDOFF.md` records what is in flight right now.
+
+The catalogue is currently small and its categories are partly curated; the rights
+gate is the reason, and that is the intended trade.
 
 ## Setup
 
@@ -108,7 +116,16 @@ uv run velmor --help
 uv run velmor sources --env dev
 uv run velmor run scout   --env dev
 uv run velmor run auditor --env dev
+uv run velmor publish --env dev
+uv run velmor serve --env dev
+uv run velmor curate --model <provider:model> --env dev --apply
+uv run velmor cover list --env dev
 ```
+
+`velmor curate` is the one operator command that calls a model: it proposes the
+display title, the summary and the category of each good, and it refuses to run
+without `--apply`. It loads the API profile, so that profile needs the model
+credential. `HANDOFF.md` records how it is supplied on the demo host.
 
 ## Test and lint
 
@@ -126,6 +143,7 @@ uv run python -m compileall -q packages velmor
 | End-to-end autonomous work | `/ship <task>` |
 | Review gate (bugs + security) | `/review` |
 | Prove the publication gate still refuses what it must | `/rights-verify` |
+| Prove a buyer can see, understand and buy, in every locale | `/ux-verify` |
 | Plan a change (OpenSpec) | `/opsx-propose <task>` |
 | Implement a change | `/opsx-apply` |
 | Archive a finished change | `/opsx-archive` |
@@ -133,8 +151,14 @@ uv run python -m compileall -q packages velmor
 Start with `AGENTS.md`. It is the single source of truth for structure,
 conventions and the working rules an agent must follow. `.cursor/rules/*.mdc` are
 the normative rules, `.cursor/skills/` holds the project skills
-(`run-the-project`, `rights-engine`, `source-connector`, `agent-graph`), and
-`openspec/config.yaml` carries the project context OpenSpec shows to the writer.
+(`run-the-project`, `rights-engine`, `source-connector`, `agent-graph`,
+`storefront-ux`), and `openspec/config.yaml` carries the project context OpenSpec
+shows to the writer.
+
+Anything a buyer reads or acts on is specified by what the buyer sees, not only by
+what the system does: `.cursor/rules/07-product-surface.mdc` is normative there, and
+a change to such a surface is verified by looking at it, with a screenshot as the
+evidence.
 
 ## Security
 

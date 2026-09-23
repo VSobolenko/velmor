@@ -3,7 +3,8 @@
 - [ ] 1.1 Add `pillow` to the workspace and rebuild the lockfile; note the reason in `pyproject.toml`.
 - [ ] 1.2 Storefront: add Tailwind v4 and PostCSS, move the design tokens into `@theme` in `globals.css`, keep the existing brand palette.
 - [ ] 1.3 Storefront: `src/lib/i18n/{ru,be,en}.json` with every string the shop renders; `src/lib/i18n/index.ts` with `dictionaryFor(locale)`, `negotiate(acceptLanguage, cookie)`, `isLocale`.
-- [ ] 1.4 Storefront: `middleware.ts` resolving `pb_locale` cookie, then `Accept-Language`, then `ru`; rewrite into `/[locale]`.
+- [ ] 1.4 Storefront: `src/proxy.ts` (the middleware file; this Next.js version names it `proxy.ts`)
+      resolving `pb_locale` cookie, then `Accept-Language`, then `ru`; rewrite into `/[locale]`.
 - [ ] 1.5 Storefront: move every page under `src/app/[locale]/`; `lang`, `hreflang`, localised metadata; `LanguageSwitcher` writing the cookie.
 - [ ] 1.6 Storefront: `scripts/check-i18n.mjs` asserting key parity across the three files and that no component contains a literal user-facing string; wire it into `npm run lint` prerequisites.
 - [ ] 1.7 Tests: negotiation order, unknown locale, dictionary parity, a locale-prefixed URL that keeps its page.

@@ -242,10 +242,16 @@ Implemented and tested:
   `velmor serve`, `velmor publish`, `velmor seed-disclosure`.
 - `storefront/`: Next.js Proofbasket UI (browse, cart, account, checkout).
   Presentation only — no rights logic, no payment secrets, no privileged Saleor
-  credentials. Its buyer surface is being rebuilt by the `redesign-storefront-ux`
-  change (locale routing, product cards with previews, search and filters); until
-  that lands, the surface is the one described in `.cursor/skills/storefront-ux/SKILL.md`
-  under "Anti-patterns seen in this repository", not a reference.
+  credentials. The buyer surface is built and deployed: locale routing across
+  `en`/`ru`/`be`, product cards with platform-served previews, search, filters
+  and sort, and a designed state for loading, empty, failure and not-found.
+  `.cursor/skills/storefront-ux/SKILL.md` is the reference for it; the
+  "Anti-patterns seen in this repository" section records what it replaced and
+  is not a description of the current surface.
+- Open work in flight: `HANDOFF.md` at the repository root. It records the
+  deployed commit, the two shipped OpenSpec changes whose tasks are unmarked and
+  whose specs are not yet merged, and the remaining work. Read it before starting
+  storefront work, and delete it with its pointer here when it is closed.
 - Demo deploy: Saleor on the host; shop at
   `https://shop.78-111-89-46.sslip.io/` (current demo host, not a product domain).
 - The vertical slice is walkable end to end: Openverse discovery -> screening ->
