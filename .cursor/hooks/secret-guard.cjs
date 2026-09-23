@@ -29,8 +29,14 @@ const SECRET_PATTERNS = [
 // A connection string with an embedded password is a credential. Loopback and
 // the compose service names are development defaults and are expected in
 // .env.example, so they are exempt.
-const LOCAL_HOSTS = /@(localhost|127\.0\.0\.1|::1|db|postgres|redis)[:/]/
-const CREDENTIAL_URL = /\b(postgres(ql)?(\+\w+)?|redis|rediss|amqp|mongodb(\+srv)?):\/\/[^:@\s/]+:[^@\s]+@/g
+//
+// The host has to be part of CREDENTIAL_URL, and LOCAL_HOSTS has to accept the
+// end of the match as well as a separator. The pattern used to stop at the `@`,
+// so the matched text never contained a host and this exemption could not fire
+// for anything: `.env.example` and the settings fixture, which hold only a
+// loopback development DSN by design, were denied on every edit.
+const LOCAL_HOSTS = /@(\[::1\]|::1|localhost|127\.0\.0\.1|db|postgres|redis)([:/]|$)/
+const CREDENTIAL_URL = /\b(postgres(ql)?(\+\w+)?|redis|rediss|amqp|mongodb(\+srv)?):\/\/[^:@\s/]+:[^@\s]+@[^/\s]*/g
 
 // The tool-input key holding the target path is not part of a documented
 // contract, so several spellings are accepted. The value is only used to decide
@@ -56,12 +62,10 @@ function findSecrets(text) {
   return found
 }
 
+const hookIo = require('./lib/hook-io.cjs')
+
 function readInput() {
-  try {
-    return fs.readFileSync(0, 'utf8')
-  } catch (error) {
-    return ''
-  }
+  return hookIo.readStdin()
 }
 
 function deny(names) {
