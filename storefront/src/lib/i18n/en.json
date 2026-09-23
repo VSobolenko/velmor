@@ -181,7 +181,7 @@
   "checkout.returnPaidNote": "The payment provider has confirmed the payment. Downloads are on the order page.",
 
   "account.title": "Account",
-  "account.demoNote": "The buyer id is the NEXT_PUBLIC_BUYER_ID demo header until real authentication exists.",
+  "account.demoNote": "This demo shop has no sign-in yet, so orders and downloads are shown for a single demonstration buyer.",
   "account.orders": "Orders",
   "account.ordersHint": "This buyer's order history",
   "account.entitlements": "Download rights",

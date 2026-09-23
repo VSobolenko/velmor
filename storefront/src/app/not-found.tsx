@@ -30,6 +30,12 @@ export default async function NotFound() {
         cleared: dict["cart.announceCleared"],
       }}
     >
+      <a
+        className="sr-only focus:not-sr-only focus:absolute focus:left-4 focus:top-4 focus:z-50 focus:rounded-md focus:bg-surface focus:px-4 focus:py-2 focus:text-ink"
+        href="#content"
+      >
+        {dict["common.skipToContent"]}
+      </a>
       <SiteHeader locale={locale} dict={dict} />
       <main
         id="content"

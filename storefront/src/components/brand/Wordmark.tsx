@@ -16,7 +16,7 @@ export type WordmarkProps = {
 
 /** The identity's display steps: the wordmark is a display element, so it uses those. */
 const SIZE_CLASSES: Record<WordmarkSize, string> = {
-  sm: "text-2xl",
+  sm: "text-lg sm:text-2xl",
   md: "text-3xl",
   lg: "text-4xl",
 };
@@ -77,7 +77,7 @@ export function Wordmark({ name, locale, href, size = "md", className }: Wordmar
   return (
     <Link
       className={classNames(
-        "tap-target inline-flex items-center font-heading font-semibold tracking-tight",
+        "tap-target inline-flex items-center whitespace-nowrap font-heading font-semibold tracking-tight",
         SIZE_CLASSES[size],
         className,
       )}

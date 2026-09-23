@@ -35,9 +35,12 @@ export default async function AccountPage({ params }: Props) {
       <ul className="grid gap-gutter sm:grid-cols-2">
         {entries.map((entry) => (
           <li key={entry.href}>
-            <Card variant="flat" className="flex h-full flex-col gap-1">
+            <Card variant="flat" className="relative flex h-full flex-col gap-1">
               <h2 className="font-heading text-lg font-semibold text-ink">
-                <Link className="hover:underline" href={entry.href}>
+                <Link
+                  className="flex min-h-11 min-w-11 items-center after:absolute after:inset-0 hover:underline"
+                  href={entry.href}
+                >
                   {entry.title}
                 </Link>
               </h2>

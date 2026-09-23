@@ -46,7 +46,7 @@ export function MobileNav({
   const close = useCallback(() => setOpen(false), []);
 
   return (
-    <div className="lg:hidden">
+    <div className="flex shrink-0 items-center lg:hidden">
       <Button
         variant="secondary"
         size="sm"
