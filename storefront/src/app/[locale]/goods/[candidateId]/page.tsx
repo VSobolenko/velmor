@@ -1,6 +1,5 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { AddToCartButton } from "@/components/AddToCartButton";
 import { BUY_BOX_ACTION_ID, BuyBox } from "@/components/BuyBox";
 import { ObligationList } from "@/components/ObligationList";
 import { RelatedGoods } from "@/components/RelatedGoods";
@@ -20,9 +19,6 @@ export const dynamic = "force-dynamic";
 
 /** Related goods fill the grid's last row; the good being viewed is dropped from it. */
 const RELATED_LIMIT = 5;
-
-/** The in-flow action repeated below the detail; the sticky bar mirrors it as well. */
-const DETAIL_ACTION_ID = "detail-action";
 
 type Props = {
   params: Promise<{ locale: string; candidateId: string }>;
@@ -179,18 +175,6 @@ export default async function GoodPage({ params }: Props) {
           ) : null}
         </section>
 
-        <div id={DETAIL_ACTION_ID} className="mt-10">
-          <AddToCartButton
-            candidateId={card.candidate_id}
-            title={card.title}
-            unitAmount={card.unit_amount}
-            currency={card.currency}
-            label={dict["product.addToCart"]}
-            addedLabel={dict["product.addedToCart"]}
-            size="lg"
-          />
-        </div>
-
         <div className="mt-14">
           <RelatedGoods cards={related} locale={locale} dict={dict} />
         </div>
@@ -202,7 +186,7 @@ export default async function GoodPage({ params }: Props) {
         unitAmount={card.unit_amount}
         currency={card.currency}
         dict={dict}
-        anchorIds={[BUY_BOX_ACTION_ID, DETAIL_ACTION_ID]}
+        anchorIds={[BUY_BOX_ACTION_ID]}
       />
     </div>
   );

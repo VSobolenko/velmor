@@ -12,9 +12,9 @@ type Props = {
   currency: string;
   dict: Dictionary;
   /**
-   * The ids of the in-flow add-to-cart controls this bar mirrors (the buy box action and the
-   * repeat below the detail). It shows only while none of them is on screen, so it never
-   * offers a second copy of a control the buyer can already see.
+   * The ids of the in-flow add-to-cart controls this bar mirrors (the buy box action). It
+   * shows only while none of them is on screen, so it never offers a second copy of a
+   * control the buyer can already see.
    */
   anchorIds: readonly string[];
 };

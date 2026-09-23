@@ -170,7 +170,7 @@
   "checkout.mustShareCurrency": "Every cart line must share one currency.",
   "checkout.checkoutFailed": "Checkout failed",
   "checkout.unavailableDisclosure": "Payment is unavailable while the seller disclosure is incomplete.",
-  "checkout.buyerDemoNote": "The buyer id is a configured demo id until authentication exists.",
+  "checkout.buyerDemoNote": "This demo shop has no sign-in yet, so you shop and check out as a single demonstration buyer.",
   "checkout.backToCart": "Back to the cart",
   "checkout.returnTitle": "Returned from payment",
   "checkout.returnNotice": "Payment confirmation comes from the provider. This page does not mark the order as paid.",

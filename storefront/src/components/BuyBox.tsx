@@ -13,8 +13,8 @@ type Props = {
 };
 
 /**
- * The id of the buy box's add-to-cart wrapper. `StickyBuyBar` observes it (with the repeat
- * below the detail) so the bar appears only while no in-flow action is on screen.
+ * The id of the buy box's add-to-cart wrapper. `StickyBuyBar` observes it so the bar appears
+ * only while no in-flow action is on screen.
  */
 export const BUY_BOX_ACTION_ID = "buy-box-action";
 
