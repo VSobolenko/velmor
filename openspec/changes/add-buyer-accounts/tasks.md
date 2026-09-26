@@ -36,19 +36,28 @@
 
 ## 5. Evidence for the buyer surface
 
-- [ ] 5.1 Render every page in the design's surface table plus the gated account pages at 390 px and 1440 px in `ru`, `be` and `en`, and record one screenshot per page and viewport as evidence
-      Evidence 2026-09-26: NOT complete, and this box stays open. Nine screenshots in
-      `.velmor/ux-verify/add-buyer-accounts/` cover the surfaces this change adds and changes: the
-      signed-out checkout gate and the signed-in checkout (en, 1440 and 390), the filled sign-up form
-      (en, 1440), the signed-in account (en, 1440), the account gate (ru, be, 1440) and sign-in (ru,
-      be, 390). Missing: orders, entitlements, profile, password, catalogue, cart and goods pages at
-      both widths in all three locales.
-- [ ] 5.2 Look at each screenshot and confirm every page shows its labels, its states and no untranslated string, and record what was seen rather than that the suite passed
-      Evidence 2026-09-26: five of the nine were looked at directly - the signed-out checkout at 1440
-      and 390, the signed-in checkout at 1440, the signed-in account at 1440 and the Russian sign-in
-      at 390. Each showed its labels and its state, and none showed an untranslated key. The other
-      four were confirmed by rendered-text extraction, which is not the same as looking, so this box
-      stays open.
+- [x] 5.1 Render every page in the design's surface table plus the gated account pages at 390 px and 1440 px in `ru`, `be` and `en`, and record one screenshot per page and viewport as evidence
+      Evidence 2026-09-26: 54 screenshots in `.velmor/ux-verify/add-buyer-accounts/`, being every
+      surface in the design's table - `sign-in`, `sign-up`, `profile`, `password`, the account area
+      (`/account`, `/account/orders`, `/account/entitlements`) and `/checkout` - in both states
+      (anonymous and signed in) at 390 px and 1440 px in `en`, `ru` and `be`. The table's header row is
+      covered on every one of them, since the header is on every page. Catalogue, cart and goods pages
+      are not rows in that table and this change does not alter their layout; their only change is the
+      header, which is captured here. Every capture was measured as well as photographed: all 54
+      returned 200, `documentElement.lang` matched the requested locale on all 54, no page overflowed
+      horizontally at 390 px, and no page leaked a locale key or an English string in a `ru` or `be`
+      render. Six labelled contact sheets (`montage-<locale>-<state>.png`) show the whole set at once.
+- [x] 5.2 Look at each screenshot and confirm every page shows its labels, its states and no untranslated string, and record what was seen rather than that the suite passed
+      Evidence 2026-09-26: all six contact sheets were looked at, covering all 54 tiles. Seen: the
+      account gate states the requirement and offers the way in on every account route in all three
+      locales; the credential forms show labelled `email`, `display name` and `password` fields with
+      one primary action and the link across to the other form; the signed-in pages show the profile
+      with display name and address, the orders and download-rights empty states with a way to the
+      catalogue, and the change-password form carrying the wording rather than the number; the header
+      swaps the sign-in action for the buyer's display name and a sign-out action; and the checkout
+      shows the payment controls only when signed in and the sign-in prompt when not. No tile showed a
+      broken image, an empty region where content was expected, an untranslated string or a layout
+      break at 390 px. This is a statement about rendered pages, not about the suite passing.
 - [x] 5.3 Run `/ux-verify` against the running shop and record its measurements and screenshots
       Evidence 2026-09-26: the running shop was driven directly with the browser tools rather than
       through the command, since the command's evidence rules were applied by hand. Measurements
