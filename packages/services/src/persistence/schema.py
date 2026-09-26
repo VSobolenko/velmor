@@ -16,6 +16,31 @@ class Schema:
 
     metadata = MetaData()
 
+    # The account travels as one JSONB payload beside the scalar columns the
+    # rate limiter reads. Every write writes the whole row from the model in one
+    # statement, so ``account`` and its scalar columns cannot drift apart: a
+    # column and a JSONB field that disagree would be two answers to whether a
+    # sign-in is throttled.
+    users = Table(
+        'users',
+        metadata,
+        Column('account_id', Text, primary_key=True),
+        Column('email', Text, nullable=False, unique=True),
+        Column('account', JSONB, nullable=False),
+        Column('failed_attempts', BigInteger, nullable=False),
+        Column('last_failed_at', DateTime(timezone=True), nullable=True),
+    )
+    sessions = Table(
+        'sessions',
+        metadata,
+        Column('token_hash', Text, primary_key=True),
+        Column('user_id', Text, nullable=False, index=True),
+        Column('created_at', DateTime(timezone=True), nullable=False),
+        Column('expires_at', DateTime(timezone=True), nullable=False),
+        Column('revoked_at', DateTime(timezone=True), nullable=True),
+        Column('session', JSONB, nullable=False),
+    )
+
     candidates = Table(
         'candidates',
         metadata,

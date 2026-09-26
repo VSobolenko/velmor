@@ -15,12 +15,13 @@ from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Annotated
 
-from fastapi import FastAPI, Query, Request
+from fastapi import Depends, FastAPI, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel, SecretStr
 
 from packages.core.src.errors import VelmorError
+from packages.services.src.auth.service import AccountService
 from packages.services.src.commerce.catalogue_service import StorefrontCatalogue
 from packages.services.src.commerce.checkout import CheckoutService
 from packages.services.src.commerce.delivery import DeliveryService
@@ -37,6 +38,7 @@ from packages.services.src.commerce.errors import (
 )
 from packages.services.src.commerce.grants import DeliveryGrantService
 from packages.services.src.commerce.preview import GoodPreview
+from packages.services.src.domain.account import Account
 from packages.services.src.domain.cart import Cart, CartLine
 from packages.services.src.domain.catalogue_card import CatalogueCard, CategorySummary
 from packages.services.src.domain.catalogue_query import CatalogueSort
@@ -86,6 +88,40 @@ class RefundBody(BaseModel):
     reason: str
 
 
+class RegisterBody(BaseModel):
+    """Credentials a buyer registers with. The password is never echoed back."""
+
+    model_config = {'frozen': True}
+
+    email: str
+    password: str
+    display_name: str
+
+
+class SignInBody(BaseModel):
+    model_config = {'frozen': True}
+
+    email: str
+    password: str
+
+
+class ChangePasswordBody(BaseModel):
+    model_config = {'frozen': True}
+
+    current_password: str
+    new_password: str
+
+
+class UnauthenticatedError(VelmorError):
+    """A guarded route was reached without a valid session.
+
+    Raised by ``ApiApplication._require_buyer`` and turned into the fixed
+    ``unauthenticated`` refusal by ``_unauthenticated_handler``. It is a value
+    level refusal like every other in this module: no route catches it, and no
+    route falls back to an identity taken from the request.
+    """
+
+
 class ApiApplication:
     """The HTTP surface of the platform.
 
@@ -94,7 +130,6 @@ class ApiApplication:
     """
 
     SERVICE_NAME = 'velmor-api'
-    BUYER_HEADER = 'x-buyer-id'
     OPERATOR_HEADER = 'x-operator-key'
     STRIPE_SIGNATURE_HEADER = 'stripe-signature'
     BEPAID_SIGNATURE_HEADER = 'content-signature'
@@ -103,7 +138,6 @@ class ApiApplication:
     PREVIEW_CACHE_CONTROL = 'public, max-age=31536000, immutable'
     CORS_ALLOW_METHODS = ('GET', 'POST', 'OPTIONS')
     CORS_ALLOW_HEADERS = (
-        'X-Buyer-Id',
         'Content-Type',
         'Authorization',
         'X-Stub-Signature',
@@ -113,6 +147,35 @@ class ApiApplication:
         'http://127.0.0.1:3000',
     )
     BASE_PROVIDER_IDS = ('stripe', 'bepaid')
+    #: The ``unauthenticated`` refusal, which belongs to the transport rather
+    #: than to ``AccountService``: a session problem is not an account outcome.
+    UNAUTHENTICATED = 'unauthenticated'
+    UNAUTHENTICATED_DETAIL = 'a valid session is required'
+    #: Every account refusal, its fixed English detail and its status. ``reason``
+    #: is the contract the storefront switches on; ``detail`` is for logs and
+    #: developers and is never rendered to a buyer, so no password value and no
+    #: internal identifier appears in either. A code with no entry raises a
+    #: ``KeyError`` rather than inventing a response.
+    REFUSAL_DETAILS: dict[str, str] = {
+        AccountService.EMAIL_REQUIRED: 'an email address is required',
+        AccountService.EMAIL_UNAVAILABLE: 'that email address cannot be used',
+        AccountService.INVALID_CREDENTIALS: (
+            'the email address and password did not match'
+        ),
+        AccountService.PASSWORD_TOO_SHORT: (
+            'the password is shorter than the minimum length'
+        ),
+        AccountService.CURRENT_PASSWORD_INCORRECT: 'the current password is incorrect',
+        AccountService.RATE_LIMITED: 'too many sign-in attempts; try again later',
+    }
+    REFUSAL_STATUSES: dict[str, int] = {
+        AccountService.EMAIL_REQUIRED: 400,
+        AccountService.EMAIL_UNAVAILABLE: 400,
+        AccountService.INVALID_CREDENTIALS: 401,
+        AccountService.PASSWORD_TOO_SHORT: 400,
+        AccountService.CURRENT_PASSWORD_INCORRECT: 400,
+        AccountService.RATE_LIMITED: 429,
+    }
     #: The documented preview refusals and the status each maps to
     #: (openspec/specs/commerce/storefront; contract.md, GET
     #: /catalogue/goods/{candidate_id}/preview). 404 keeps one meaning - no
@@ -153,6 +216,10 @@ class ApiApplication:
         orders: OrderRepository,
         operator_refund_key: SecretStr,
         storefront_domain: str,
+        accounts: AccountService,
+        session_cookie_name: str,
+        session_lifetime_seconds: int,
+        password_min_length: int,
         stub: StubPaymentProvider | None = None,
         lifespan: Lifespan | None = None,
     ) -> None:
@@ -172,6 +239,10 @@ class ApiApplication:
         self._orders = orders
         self._operator_refund_key = operator_refund_key
         self._storefront_domain = storefront_domain
+        self._accounts = accounts
+        self._session_cookie_name = session_cookie_name
+        self._session_lifetime_seconds = session_lifetime_seconds
+        self._password_min_length = password_min_length
         self._lifespan = lifespan
 
     def build(self) -> FastAPI:
@@ -192,6 +263,7 @@ class ApiApplication:
         app.add_api_route('/health', self._health, methods=['GET'])
         for preview_error, refusal in self.PREVIEW_REFUSALS.items():
             app.add_exception_handler(preview_error, self._refusal_handler(*refusal))
+        app.add_exception_handler(UnauthenticatedError, self._unauthenticated_handler)
         app.add_api_route('/', self._root, methods=['GET'])
         app.add_api_route(
             '/catalogue/categories', self._list_categories, methods=['GET']
@@ -208,18 +280,50 @@ class ApiApplication:
             self._get_good_preview,
             methods=['GET'],
         )
+        app.add_api_route('/auth/register', self._register, methods=['POST'])
+        app.add_api_route('/auth/session', self._sign_in, methods=['POST'])
+        app.add_api_route('/auth/session', self._sign_out, methods=['DELETE'])
+        app.add_api_route(
+            '/auth/me',
+            self._me,
+            methods=['GET'],
+            dependencies=[Depends(self._require_buyer)],
+        )
+        app.add_api_route(
+            '/auth/password',
+            self._change_password,
+            methods=['POST'],
+            dependencies=[Depends(self._require_buyer)],
+        )
         app.add_api_route(
             '/account/goods/{candidate_id}/grant',
             self._issue_grant,
             methods=['POST'],
+            dependencies=[Depends(self._require_buyer)],
         )
-        app.add_api_route('/downloads/{token}', self._download, methods=['GET'])
         app.add_api_route(
-            '/account/entitlements', self._list_entitlements, methods=['GET']
+            '/downloads/{token}',
+            self._download,
+            methods=['GET'],
+            dependencies=[Depends(self._require_buyer)],
         )
-        app.add_api_route('/account/orders', self._list_orders, methods=['GET'])
         app.add_api_route(
-            '/account/orders/{order_id}', self._get_order, methods=['GET']
+            '/account/entitlements',
+            self._list_entitlements,
+            methods=['GET'],
+            dependencies=[Depends(self._require_buyer)],
+        )
+        app.add_api_route(
+            '/account/orders',
+            self._list_orders,
+            methods=['GET'],
+            dependencies=[Depends(self._require_buyer)],
+        )
+        app.add_api_route(
+            '/account/orders/{order_id}',
+            self._get_order,
+            methods=['GET'],
+            dependencies=[Depends(self._require_buyer)],
         )
         app.add_api_route(
             '/checkout/disclosure', self._checkout_disclosure, methods=['GET']
@@ -227,7 +331,12 @@ class ApiApplication:
         app.add_api_route(
             '/checkout/providers', self._checkout_providers, methods=['GET']
         )
-        app.add_api_route('/checkout/start', self._checkout_start, methods=['POST'])
+        app.add_api_route(
+            '/checkout/start',
+            self._checkout_start,
+            methods=['POST'],
+            dependencies=[Depends(self._require_buyer)],
+        )
         app.add_api_route('/webhooks/stripe', self._stripe_webhook, methods=['POST'])
         app.add_api_route('/webhooks/bepaid', self._bepaid_webhook, methods=['POST'])
         if self._stub is not None:
@@ -260,6 +369,105 @@ class ApiApplication:
         listing of it.
         """
         return JSONResponse({'service': self.SERVICE_NAME, 'status': 'ok'})
+
+    async def _register(self, body: RegisterBody) -> JSONResponse:
+        """Create the account, sign the buyer in and return the profile.
+
+        A refusal is one of ``AccountService``'s codes, mapped by ``_refusal``
+        to the fixed body and status. Nothing on the path echoes the password.
+        """
+        outcome = await self._accounts.register(
+            body.email, body.password, body.display_name
+        )
+        if outcome.reason is not None:
+            return self._refusal(outcome.reason)
+        response = JSONResponse(
+            self._profile_payload(outcome.account), status_code=201
+        )
+        self._set_session_cookie(response, outcome.token)
+        return response
+
+    async def _sign_in(self, body: SignInBody) -> JSONResponse:
+        outcome = await self._accounts.sign_in(body.email, body.password)
+        if outcome.reason is not None:
+            return self._refusal(outcome.reason)
+        response = JSONResponse(self._profile_payload(outcome.account))
+        self._set_session_cookie(response, outcome.token)
+        return response
+
+    async def _sign_out(self, request: Request) -> JSONResponse:
+        """Revoke the presented session and clear the cookie.
+
+        Signing out is idempotent: with no session there is nothing to revoke and
+        the cookie is still cleared, so a buyer cannot be left holding a stale
+        cookie by pressing sign out after their session already expired.
+        """
+        token = request.cookies.get(self._session_cookie_name)
+        if token is not None and token != '':
+            await self._accounts.sign_out(token)
+        response = JSONResponse({'ok': True})
+        self._clear_session_cookie(response)
+        return response
+
+    async def _me(self, request: Request) -> JSONResponse:
+        account: Account = request.state.buyer
+        return JSONResponse(self._profile_payload(account))
+
+    async def _change_password(
+        self, request: Request, body: ChangePasswordBody
+    ) -> JSONResponse:
+        account: Account = request.state.buyer
+        token: str = request.state.session_token
+        outcome = await self._accounts.change_password(
+            account.account_id, token, body.current_password, body.new_password
+        )
+        if outcome.reason is not None:
+            return self._refusal(outcome.reason)
+        return JSONResponse(self._profile_payload(outcome.account))
+
+    def _refusal(self, code: str) -> JSONResponse:
+        """The fixed refusal body for one account code.
+
+        ``reason`` is the machine contract and ``detail`` the developer sentence;
+        a ``password_too_short`` body carries ``minimum_length`` as its own field
+        because the number is the API's, not the code's and not the copy's.
+        """
+        body: dict[str, object] = {
+            'detail': self.REFUSAL_DETAILS[code],
+            'reason': code,
+        }
+        if code == AccountService.PASSWORD_TOO_SHORT:
+            body['minimum_length'] = self._password_min_length
+        return JSONResponse(body, status_code=self.REFUSAL_STATUSES[code])
+
+    @staticmethod
+    def _profile_payload(account: Account) -> dict[str, object]:
+        """The buyer's own profile, and nothing that authenticates them."""
+        return {
+            'id': account.account_id,
+            'email': account.email,
+            'display_name': account.display_name,
+        }
+
+    def _set_session_cookie(self, response: Response, token: str) -> None:
+        response.set_cookie(
+            key=self._session_cookie_name,
+            value=token,
+            max_age=self._session_lifetime_seconds,
+            httponly=True,
+            secure=True,
+            samesite='lax',
+            path='/',
+        )
+
+    def _clear_session_cookie(self, response: Response) -> None:
+        response.delete_cookie(
+            key=self._session_cookie_name,
+            path='/',
+            secure=True,
+            httponly=True,
+            samesite='lax',
+        )
 
     async def _list_categories(
         self, locale: Annotated[Locale, Query()] = DEFAULT_LOCALE
@@ -394,16 +602,11 @@ class ApiApplication:
     async def _issue_grant(self, candidate_id: str, request: Request) -> JSONResponse:
         """Issue a short-lived download grant for an entitled buyer.
 
-        Buyer identity is taken from the temporary ``X-Buyer-Id`` header.
-        Saleor/customer session auth is deferred to storefront work (group 6);
-        this route keeps the stand-in rather than inventing a session store.
+        The buyer is the session owner: the route carries the session dependency,
+        so ``request.state.buyer`` is set before this runs and no request value
+        can name an owner.
         """
-        buyer_id = self._require_buyer_id(request)
-        if buyer_id is None:
-            return JSONResponse(
-                {'detail': 'missing or empty X-Buyer-Id header'},
-                status_code=401,
-            )
+        buyer_id = self._buyer_id(request)
         rows = await self._entitlements.for_buyer_candidate(buyer_id, candidate_id)
         if not any(row.state is EntitlementState.ACTIVE for row in rows):
             return JSONResponse(
@@ -421,15 +624,11 @@ class ApiApplication:
     async def _download(self, token: str, request: Request) -> Response:
         """Serve bytes for a verified grant.
 
-        Buyer identity is taken from the temporary ``X-Buyer-Id`` header.
-        Saleor/customer session auth is deferred to storefront work (group 6).
+        The buyer is the session owner, which is also what makes a download work
+        as a browser navigation: the cookie is sent on the navigation, and no
+        header is needed.
         """
-        buyer_id = self._require_buyer_id(request)
-        if buyer_id is None:
-            return JSONResponse(
-                {'detail': 'missing or empty X-Buyer-Id header'},
-                status_code=401,
-            )
+        buyer_id = self._buyer_id(request)
         # GrantRefusedError / DeliveryRefusedError are the documented refusal
         # contracts of the grant and delivery services; mapping them to HTTP is
         # the route's job (task 4.3 R4 / R6).
@@ -449,32 +648,17 @@ class ApiApplication:
         )
 
     async def _list_entitlements(self, request: Request) -> JSONResponse:
-        buyer_id = self._require_buyer_id(request)
-        if buyer_id is None:
-            return JSONResponse(
-                {'detail': 'missing or empty X-Buyer-Id header'},
-                status_code=401,
-            )
+        buyer_id = self._buyer_id(request)
         rows = await self._entitlements.for_buyer(buyer_id)
         return JSONResponse([self._entitlement_payload(row) for row in rows])
 
     async def _list_orders(self, request: Request) -> JSONResponse:
-        buyer_id = self._require_buyer_id(request)
-        if buyer_id is None:
-            return JSONResponse(
-                {'detail': 'missing or empty X-Buyer-Id header'},
-                status_code=401,
-            )
+        buyer_id = self._buyer_id(request)
         orders = await self._orders.orders_for_buyer(buyer_id)
         return JSONResponse([order.model_dump(mode='json') for order in orders])
 
     async def _get_order(self, order_id: str, request: Request) -> JSONResponse:
-        buyer_id = self._require_buyer_id(request)
-        if buyer_id is None:
-            return JSONResponse(
-                {'detail': 'missing or empty X-Buyer-Id header'},
-                status_code=401,
-            )
+        buyer_id = self._buyer_id(request)
         order = await self._orders.by_order_id(order_id)
         if order is None or order.buyer_id != buyer_id:
             return JSONResponse({'detail': 'order not found'}, status_code=404)
@@ -514,14 +698,11 @@ class ApiApplication:
         """Start payment for the posted cart lines.
 
         There is no server-side cart table in this change: the client POSTs the
-        lines (task 5.5 R5 / design of Cart as a value object).
+        lines (task 5.5 R5 / design of Cart as a value object). The owner is the
+        session account, and the session dependency refuses before this runs, so
+        no payment is attempted without one.
         """
-        buyer_id = self._require_buyer_id(request)
-        if buyer_id is None:
-            return JSONResponse(
-                {'detail': 'missing or empty X-Buyer-Id header'},
-                status_code=401,
-            )
+        buyer_id = self._buyer_id(request)
         cart = Cart(
             buyer_id=buyer_id,
             currency=body.currency,
@@ -635,13 +816,37 @@ class ApiApplication:
         expected = self._operator_refund_key.get_secret_value()
         return hmac.compare_digest(provided, expected)
 
-    def _require_buyer_id(self, request: Request) -> str | None:
-        if self.BUYER_HEADER not in request.headers:
-            return None
-        buyer_id = request.headers[self.BUYER_HEADER]
-        if buyer_id == '':
-            return None
-        return buyer_id
+    async def _require_buyer(self, request: Request) -> None:
+        """Resolve the session cookie to an account, or refuse as unauthenticated.
+
+        Registered as a route dependency on every route that needs an owner, so
+        the refusal happens before the handler runs and before any payment is
+        attempted. It writes ``buyer`` and ``session_token`` onto the request
+        state; ``_buyer_id`` reads the former, and the password change reads the
+        latter to revoke the account's other sessions. There is no header and no
+        caller-supplied identity anywhere on this path.
+        """
+        token = request.cookies.get(self._session_cookie_name)
+        if token is None or token == '':
+            raise UnauthenticatedError()
+        account = await self._accounts.authenticate(token)
+        if account is None:
+            raise UnauthenticatedError()
+        request.state.buyer = account
+        request.state.session_token = token
+
+    @staticmethod
+    def _buyer_id(request: Request) -> str:
+        account: Account = request.state.buyer
+        return account.account_id
+
+    async def _unauthenticated_handler(
+        self, _request: Request, _error: Exception
+    ) -> JSONResponse:
+        return JSONResponse(
+            {'detail': self.UNAUTHENTICATED_DETAIL, 'reason': self.UNAUTHENTICATED},
+            status_code=401,
+        )
 
     @staticmethod
     def _entitlement_payload(row: Entitlement) -> dict[str, object]:

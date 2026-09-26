@@ -39,6 +39,11 @@ class TestCommerceSettings:
         'DELIVERY_CACHE_DIR': 'var/delivery-cache',
         'CATALOGUE_UNIT_AMOUNT': '3.00',
         'CATALOGUE_CURRENCY': 'USD',
+        'SESSION_COOKIE_NAME': 'velmor_session',
+        'SESSION_LIFETIME_SECONDS': '2592000',
+        'PASSWORD_MIN_LENGTH': '10',
+        'FAILED_ATTEMPT_LIMIT': '10',
+        'FAILED_ATTEMPT_WINDOW_SECONDS': '900',
     }
 
     SECRET_FIELDS = {
@@ -81,6 +86,13 @@ class TestCommerceSettings:
         assert settings.delivery_cache_dir == Path(self.COMMERCE_VALUES['DELIVERY_CACHE_DIR'])
         assert settings.catalogue_unit_amount == Decimal('3.00')
         assert settings.catalogue_currency == 'USD'
+        assert settings.session_cookie_name == self.COMMERCE_VALUES[
+            'SESSION_COOKIE_NAME'
+        ]
+        assert settings.session_lifetime_seconds == 2592000
+        assert settings.password_min_length == 10
+        assert settings.failed_attempt_limit == 10
+        assert settings.failed_attempt_window_seconds == 900
 
     def test_the_secret_fields_are_secret_str(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch

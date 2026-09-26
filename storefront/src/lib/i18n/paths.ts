@@ -26,3 +26,11 @@ export function localePath(locale: Locale, path: string): string {
   }
   return `${prefix}/${rest.join("/")}${query}${hash}`;
 }
+
+/**
+ * The sign-in address, carrying the path the buyer was on so a successful sign-in returns them
+ * there. The `next` value is the path the caller already holds, which includes the locale.
+ */
+export function signInHref(locale: Locale, path: string): string {
+  return `${localePath(locale, "/account/sign-in")}?next=${encodeURIComponent(path)}`;
+}

@@ -3,6 +3,14 @@
 
 shop.78-111-89-46.sslip.io {
 	encode gzip
+
+	# The storefront's own origin reaches the API here, so the session cookie the API
+	# sets is first-party and `SameSite=Lax` is sufficient for it. handle_path strips
+	# the prefix: the browser calls /api/auth/session, the API sees /auth/session.
+	handle_path /api/* {
+		reverse_proxy host.docker.internal:8080
+	}
+
 	reverse_proxy host.docker.internal:3000
 }
 

@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 from collections.abc import Iterable
+from datetime import datetime
 
+from packages.services.src.domain.account import Account, Session
 from packages.services.src.domain.candidate import Candidate
 from packages.services.src.domain.catalogue import CatalogueEntry, SaleableEntry
 from packages.services.src.domain.catalogue_query import (
@@ -47,6 +49,68 @@ class InMemoryStore:
         self._disclosures: dict[str, SellerDisclosure] = {}
         self._orders: dict[str, Order] = {}
         self._orders_by_provider_ref: dict[tuple[str, str], str] = {}
+        self._accounts: dict[str, Account] = {}
+        self._accounts_by_email: dict[str, str] = {}
+        self._sessions: dict[str, Session] = {}
+
+    async def create_account(self, account: Account) -> bool:
+        if account.email in self._accounts_by_email:
+            return False
+        self._accounts[account.account_id] = account
+        self._accounts_by_email[account.email] = account.account_id
+        return True
+
+    async def save_account(self, account: Account) -> None:
+        self._accounts[account.account_id] = account
+        self._accounts_by_email[account.email] = account.account_id
+
+    async def by_email(self, email: str) -> Account | None:
+        account_id = self._accounts_by_email.get(email)
+        return None if account_id is None else self._accounts[account_id]
+
+    async def by_account_id(self, account_id: str) -> Account | None:
+        return self._accounts.get(account_id)
+
+    async def record_failed_sign_in(
+        self, account_id: str, now: datetime, window_seconds: int
+    ) -> None:
+        account = self._accounts[account_id]
+        attempts = account.failed_attempts + 1
+        within_window = (
+            account.last_failed_at is not None
+            and (now - account.last_failed_at).total_seconds() <= window_seconds
+        )
+        if not within_window:
+            attempts = 1
+        await self.save_account(
+            account.model_copy(
+                update={'failed_attempts': attempts, 'last_failed_at': now}
+            )
+        )
+
+    async def clear_failed_sign_ins(self, account_id: str) -> None:
+        account = self._accounts[account_id]
+        await self.save_account(
+            account.model_copy(update={'failed_attempts': 0, 'last_failed_at': None})
+        )
+
+    async def save_session(self, session: Session) -> None:
+        self._sessions[session.token_hash] = session
+
+    async def by_token_hash(self, token_hash: str) -> Session | None:
+        return self._sessions.get(token_hash)
+
+    async def revoke_session(self, token_hash: str, now: datetime) -> None:
+        session = self._sessions.get(token_hash)
+        if session is not None:
+            self._sessions[token_hash] = session.model_copy(update={'revoked_at': now})
+
+    async def revoke_other_sessions(
+        self, user_id: str, token_hash: str, now: datetime
+    ) -> None:
+        for key, session in self._sessions.items():
+            if session.user_id == user_id and key != token_hash:
+                self._sessions[key] = session.model_copy(update={'revoked_at': now})
 
     async def upsert_many(self, candidates: tuple[Candidate, ...]) -> int:
         written = 0

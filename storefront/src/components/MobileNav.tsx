@@ -21,6 +21,8 @@ type Props = {
   searchLabel: string;
   searchPlaceholder: string;
   languageSwitcher: ReactNode;
+  /** The header's account control, shown in the drawer below `lg`. */
+  account: ReactNode;
 };
 
 /**
@@ -40,6 +42,7 @@ export function MobileNav({
   searchLabel,
   searchPlaceholder,
   languageSwitcher,
+  account,
 }: Props) {
   const [open, setOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
@@ -106,6 +109,7 @@ export function MobileNav({
             ))}
           </ul>
         </nav>
+        <div className="mt-4">{account}</div>
         <div className="mt-4">{languageSwitcher}</div>
       </Sheet>
     </div>

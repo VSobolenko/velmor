@@ -1,29 +1,45 @@
 import Link from "next/link";
 import { Wordmark } from "@/components/brand";
+import { HeaderAccount } from "@/components/HeaderAccount";
 import { Button, buttonClassName } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 import { CartLink } from "./CartLink";
 import { LanguageSwitcher, type LocaleOption } from "./LanguageSwitcher";
 import { MobileNav, type NavLink } from "./MobileNav";
+import type { BuyerProfile } from "@/lib/api";
 import type { Dictionary, Locale } from "@/lib/i18n";
 import { localePath } from "@/lib/i18n/paths";
 
 type Props = {
   locale: Locale;
   dict: Dictionary;
+  /** The signed-in buyer, or `null` for a visitor with no session. */
+  profile: BuyerProfile | null;
 };
 
 /** The catalogue route the search field and the primary navigation submit to. */
 const CATALOGUE_PATH = "/catalogue";
 
-export function SiteHeader({ locale, dict }: Props) {
+export function SiteHeader({ locale, dict, profile }: Props) {
   const home = localePath(locale, "/");
   const catalogue = localePath(locale, CATALOGUE_PATH);
   const links: NavLink[] = [
     { href: home, label: dict["nav.home"] },
     { href: catalogue, label: dict["nav.catalogue"] },
-    { href: localePath(locale, "/account"), label: dict["nav.account"] },
+    // The account is offered only to a buyer who has one; a visitor is offered sign-in instead,
+    // through the account control below.
+    ...(profile === null
+      ? []
+      : [{ href: localePath(locale, "/account"), label: dict["nav.account"] }]),
   ];
+  const account = (
+    <HeaderAccount
+      profile={profile}
+      signInLabel={dict["nav.signIn"]}
+      signOutLabel={dict["nav.signOut"]}
+      signingOutLabel={dict["nav.signingOut"]}
+    />
+  );
   const localeLabels: Record<Locale, string> = {
     ru: dict["common.localeRu"],
     be: dict["common.localeBe"],
@@ -90,6 +106,8 @@ export function SiteHeader({ locale, dict }: Props) {
           />
         </div>
 
+        <div className="hidden lg:block">{account}</div>
+
         <div className="ml-auto lg:ml-0">
           <CartLink label={dict["nav.cart"]} countLabel={dict["cart.countLabel"]} />
         </div>
@@ -109,6 +127,7 @@ export function SiteHeader({ locale, dict }: Props) {
               options={localeOptions}
             />
           }
+          account={account}
         />
       </div>
     </header>

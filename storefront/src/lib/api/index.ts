@@ -1,12 +1,20 @@
-export { CommerceApiClient, CommerceApiError } from "./client";
+export {
+  CommerceApiClient,
+  CommerceApiError,
+  type CommerceApiFailure,
+  type CommerceApiReason,
+  type CommerceApiRefusalReason,
+} from "./client";
 export type {
   ApiErrorBody,
+  BuyerProfile,
   CatalogueCard,
   CataloguePage,
   CatalogueQuery,
   CatalogueSort,
   CategoryPage,
   CategorySummary,
+  ChangePasswordRequest,
   CheckoutDisclosureResponse,
   CheckoutLineRequest,
   CheckoutStartRequest,
@@ -18,5 +26,7 @@ export type {
   Order,
   OrderLine,
   OrderState,
+  RegisterRequest,
   SellerDisclosurePayload,
+  SignInRequest,
 } from "./types";

@@ -15,6 +15,9 @@ import { localePath } from "@/lib/i18n/paths";
  * `x-pb-locale` header the proxy sets. When it is absent the default locale is used, which is
  * the honest value for a request the shop could not localise. The chrome is rendered here
  * because the root layout holds only `<html>` and `<body>`.
+ *
+ * The header is told there is no session: a not-found boundary receives no route params, and a
+ * 404 must not depend on the account service answering.
  */
 export default async function NotFound() {
   const headerStore = await headers();
@@ -36,7 +39,7 @@ export default async function NotFound() {
       >
         {dict["common.skipToContent"]}
       </a>
-      <SiteHeader locale={locale} dict={dict} />
+      <SiteHeader locale={locale} dict={dict} profile={null} />
       <main
         id="content"
         className="mx-auto flex w-full max-w-6xl flex-col items-start gap-4 px-gutter py-section"

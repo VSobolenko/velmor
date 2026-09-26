@@ -45,3 +45,14 @@ class CommerceSettings(PlatformSettings):
             loader.required_str('CATALOGUE_UNIT_AMOUNT')
         )
         self.catalogue_currency: str = loader.required_str('CATALOGUE_CURRENCY')
+        # Buyer accounts. The lifetime is the session's, the cookie's and the
+        # stored expiry together, so there is one number to change.
+        self.session_cookie_name: str = loader.required_str('SESSION_COOKIE_NAME')
+        self.session_lifetime_seconds: int = loader.required_int(
+            'SESSION_LIFETIME_SECONDS'
+        )
+        self.password_min_length: int = loader.required_int('PASSWORD_MIN_LENGTH')
+        self.failed_attempt_limit: int = loader.required_int('FAILED_ATTEMPT_LIMIT')
+        self.failed_attempt_window_seconds: int = loader.required_int(
+            'FAILED_ATTEMPT_WINDOW_SECONDS'
+        )

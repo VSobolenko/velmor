@@ -14,7 +14,14 @@ from fastapi.testclient import TestClient
 from pydantic import SecretStr
 
 from packages.api.src.app import ApiApplication
-from packages.api.tests.unit.storefront_services import build_catalogue, build_preview
+from packages.api.tests.unit.storefront_services import (
+    TEST_PASSWORD_MIN_LENGTH,
+    TEST_SESSION_COOKIE_NAME,
+    TEST_SESSION_LIFETIME_SECONDS,
+    build_accounts,
+    build_catalogue,
+    build_preview,
+)
 from packages.services.src.commerce.asset_cache import AssetCache
 from packages.services.src.commerce.checkout import CheckoutService
 from packages.services.src.commerce.delivery import DeliveryService
@@ -35,9 +42,10 @@ DIGEST = hashlib.sha256(b'storefront-bytes').hexdigest()
 SENTINEL_ORIGIN = 'https://sentinel-origin.test/item'
 SENTINEL_DOWNLOAD = 'https://sentinel-origin.test/item.bin'
 NOW = datetime(2026, 9, 20, 12, 0, tzinfo=UTC)
-BUYER_HEADER = 'X-Buyer-Id'
-BUYER_ID = 'refusal-buyer'
-ENTITLED_BUYER = 'refusal-entitled-buyer'
+BUYER_EMAIL = 'refusal-buyer@example.test'
+ENTITLED_EMAIL = 'refusal-entitled-buyer@example.test'
+BUYER_PASSWORD = 'a sufficiently long storefront password'
+BUYER_NAME = 'Storefront Buyer'
 GRANT_LIFETIME_SECONDS = 900
 RETURN_URL = 'https://shop.example/return'
 _GRANT_SECRET = SecretStr('storefront-unit-grant-secret')
@@ -98,8 +106,33 @@ class StorefrontHarness:
             catalogue=build_catalogue(self.store, _UNIT_AMOUNT, _CURRENCY),
             preview=build_preview(self.store, self.cache, self.http),
             storefront_domain='shop.example',
+            accounts=build_accounts(self.store, lambda: NOW),
+            session_cookie_name=TEST_SESSION_COOKIE_NAME,
+            session_lifetime_seconds=TEST_SESSION_LIFETIME_SECONDS,
+            password_min_length=TEST_PASSWORD_MIN_LENGTH,
         ).build()
-        self.client = TestClient(self.app)
+        # ``https`` because the session cookie is ``Secure``.
+        self.client = self.new_client()
+        self.buyer_id = self.register(self.client, BUYER_EMAIL)
+        self.entitled_client = self.new_client()
+        self.entitled_buyer_id = self.register(self.entitled_client, ENTITLED_EMAIL)
+
+    def new_client(self) -> TestClient:
+        """A client with its own cookie jar over the same app."""
+        return TestClient(self.app, base_url='https://testserver')
+
+    def register(self, client: TestClient, email: str) -> str:
+        """Create an account and leave the client holding its session cookie."""
+        response = client.post(
+            '/auth/register',
+            json={
+                'email': email,
+                'password': BUYER_PASSWORD,
+                'display_name': BUYER_NAME,
+            },
+        )
+        assert response.status_code == 201, response.text
+        return response.json()['id']
 
     async def stock_a_good(self) -> None:
         await self.store.upsert_many(
@@ -215,7 +248,7 @@ async def test_no_refusal_route_discloses_an_origin(tmp_path: Path) -> None:
     await harness.stock_a_good()
     await harness.store.save_entitlement(
         Entitlement(
-            buyer_id=ENTITLED_BUYER,
+            buyer_id=harness.entitled_buyer_id,
             candidate_id=CANDIDATE_ID,
             order_id='order-refusal',
             granted_at=NOW,
@@ -225,43 +258,34 @@ async def test_no_refusal_route_discloses_an_origin(tmp_path: Path) -> None:
         )
     )
     expired_token, _ = harness.grants.issue(
-        BUYER_ID, CANDIDATE_ID, NOW - timedelta(seconds=GRANT_LIFETIME_SECONDS + 100)
+        harness.buyer_id,
+        CANDIDATE_ID,
+        NOW - timedelta(seconds=GRANT_LIFETIME_SECONDS + 100),
     )
-    live_token, _ = harness.grants.issue(ENTITLED_BUYER, CANDIDATE_ID, NOW)
+    live_token, _ = harness.grants.issue(
+        harness.entitled_buyer_id, CANDIDATE_ID, NOW
+    )
 
     refusals = {
         'a grant for a good the buyer does not own': (
-            harness.client.post(
-                f'/account/goods/{CANDIDATE_ID}/grant',
-                headers={BUYER_HEADER: BUYER_ID},
-            ),
+            harness.client.post(f'/account/goods/{CANDIDATE_ID}/grant'),
             403,
         ),
         'a download behind an unknown token': (
-            harness.client.get(
-                '/downloads/not-a-real-grant',
-                headers={BUYER_HEADER: BUYER_ID},
-            ),
+            harness.client.get('/downloads/not-a-real-grant'),
             403,
         ),
         'a download behind an expired token': (
-            harness.client.get(
-                f'/downloads/{expired_token}',
-                headers={BUYER_HEADER: BUYER_ID},
-            ),
+            harness.client.get(f'/downloads/{expired_token}'),
             403,
         ),
         'a download whose origin refuses': (
-            harness.client.get(
-                f'/downloads/{live_token}',
-                headers={BUYER_HEADER: ENTITLED_BUYER},
-            ),
+            harness.entitled_client.get(f'/downloads/{live_token}'),
             403,
         ),
         'a checkout start the service turns down': (
             harness.client.post(
                 '/checkout/start',
-                headers={BUYER_HEADER: BUYER_ID},
                 json={
                     'provider_id': 'stripe',
                     'return_url': RETURN_URL,

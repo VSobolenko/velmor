@@ -1,11 +1,13 @@
 import Link from "next/link";
+import { accountGate } from "@/components/AccountGate";
 import { OrderStateBadge } from "@/components/OrderStateBadge";
 import { buttonClassName } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { ErrorState } from "@/components/ui/ErrorState";
 import { PriceTag } from "@/components/ui/PriceTag";
-import { CommerceApiClient, CommerceApiError, type Order } from "@/lib/api";
+import { CommerceApiError, type Order } from "@/lib/api";
+import { commerceApiForServer } from "@/lib/api/server";
 import { formatInstant } from "@/lib/format";
 import { dictionaryFor, resolveLocale, type Locale } from "@/lib/i18n";
 import { localePath } from "@/lib/i18n/paths";
@@ -19,7 +21,8 @@ type Props = {
 type OrdersData = { kind: "ok"; orders: Order[] } | { kind: "error" };
 
 async function loadOrders(locale: Locale): Promise<OrdersData> {
-  const orders = await CommerceApiClient.fromEnv(locale).listOrders();
+  const client = await commerceApiForServer(locale);
+  const orders = await client.listOrders();
   return { kind: "ok", orders };
 }
 
@@ -27,6 +30,10 @@ export default async function OrdersPage({ params }: Props) {
   const { locale: rawLocale } = await params;
   const locale = resolveLocale(rawLocale);
   const dict = dictionaryFor(locale);
+  const gate = await accountGate(locale);
+  if (!gate.allowed) {
+    return gate.node;
+  }
 
   let data: OrdersData;
   try {

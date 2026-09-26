@@ -17,6 +17,9 @@ import { localePath } from "@/lib/i18n/paths";
  * A client component cannot read the `x-pb-locale` request header, so the locale is taken from
  * the first path segment: for every localised route that is the same value the header carries,
  * and a path without a locale falls back to the default.
+ *
+ * The header is told there is no session: a client component cannot read one, and the boundary a
+ * failure lands in must not depend on the account service answering.
  */
 export default function Error({
   retry,
@@ -37,7 +40,7 @@ export default function Error({
         cleared: dict["cart.announceCleared"],
       }}
     >
-      <SiteHeader locale={locale} dict={dict} />
+      <SiteHeader locale={locale} dict={dict} profile={null} />
       <main
         id="content"
         className="mx-auto flex w-full max-w-6xl flex-col items-start gap-4 px-gutter py-section"

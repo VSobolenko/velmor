@@ -9,7 +9,14 @@ from fastapi.testclient import TestClient
 from pydantic import SecretStr
 
 from packages.api.src.app import ApiApplication
-from packages.api.tests.unit.storefront_services import build_catalogue, build_preview
+from packages.api.tests.unit.storefront_services import (
+    TEST_PASSWORD_MIN_LENGTH,
+    TEST_SESSION_COOKIE_NAME,
+    TEST_SESSION_LIFETIME_SECONDS,
+    build_accounts,
+    build_catalogue,
+    build_preview,
+)
 from packages.services.src.commerce.asset_cache import AssetCache
 from packages.services.src.commerce.checkout import CheckoutService
 from packages.services.src.commerce.delivery import DeliveryService
@@ -87,6 +94,10 @@ def build_client(*, environment: str, storefront_domain: str, tmp_path: Path) ->
             catalogue=build_catalogue(store, UNIT_AMOUNT, CURRENCY),
             preview=build_preview(store, cache, http),
             storefront_domain=storefront_domain,
+            accounts=build_accounts(store, FixedClock(NOW)),
+            session_cookie_name=TEST_SESSION_COOKIE_NAME,
+            session_lifetime_seconds=TEST_SESSION_LIFETIME_SECONDS,
+            password_min_length=TEST_PASSWORD_MIN_LENGTH,
         ).build()
     )
 
@@ -104,14 +115,14 @@ class TestCorsPreflight:
             headers={
                 'Origin': DEV_ORIGIN,
                 'Access-Control-Request-Method': 'GET',
-                'Access-Control-Request-Headers': 'x-buyer-id',
+                'Access-Control-Request-Headers': 'content-type',
             },
         )
 
         assert response.status_code == 200
         assert response.headers['access-control-allow-origin'] == DEV_ORIGIN
         allow_headers = response.headers['access-control-allow-headers'].lower()
-        assert 'x-buyer-id' in allow_headers
+        assert 'content-type' in allow_headers
 
     def test_disallowed_origin_is_not_reflected(self, tmp_path: Path) -> None:
         client = build_client(
@@ -125,7 +136,7 @@ class TestCorsPreflight:
             headers={
                 'Origin': DISALLOWED_ORIGIN,
                 'Access-Control-Request-Method': 'GET',
-                'Access-Control-Request-Headers': 'x-buyer-id',
+                'Access-Control-Request-Headers': 'content-type',
             },
         )
 
@@ -146,7 +157,7 @@ class TestCorsPreflight:
             headers={
                 'Origin': origin,
                 'Access-Control-Request-Method': 'POST',
-                'Access-Control-Request-Headers': 'x-buyer-id,content-type',
+                'Access-Control-Request-Headers': 'content-type',
             },
         )
 

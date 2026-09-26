@@ -5,6 +5,29 @@ export type HealthResponse = {
   environment: string;
 };
 
+/** The signed-in buyer, as `/auth/me` and the auth routes return it. Never carries a password. */
+export type BuyerProfile = {
+  id: string;
+  email: string;
+  display_name: string;
+};
+
+export type RegisterRequest = {
+  email: string;
+  password: string;
+  display_name: string;
+};
+
+export type SignInRequest = {
+  email: string;
+  password: string;
+};
+
+export type ChangePasswordRequest = {
+  current_password: string;
+  new_password: string;
+};
+
 export type CheckoutLineRequest = {
   candidate_id: string;
   unit_amount: string;
@@ -84,7 +107,12 @@ export type GrantResponse = {
 };
 
 export type ApiErrorBody = {
+  /** English prose the API wrote for logs and developers; never rendered to a buyer. */
   detail: string;
+  /** The stable machine code the storefront maps to a locale key. */
+  reason?: string;
+  /** Present on `password_too_short`: the API-owned minimum password length. */
+  minimum_length?: number;
 };
 
 /**

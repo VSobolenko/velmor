@@ -12,7 +12,8 @@ import {
   type CatalogueParams,
   type RawSearchParams,
 } from "@/components/catalogue-query";
-import { CommerceApiClient, CommerceApiError } from "@/lib/api";
+import { CommerceApiError } from "@/lib/api";
+import { commerceApiForServer } from "@/lib/api/server";
 import type { CategoryPage as CategoryPageData } from "@/lib/api";
 import { formatCount } from "@/lib/format";
 import { dictionaryFor, resolveLocale } from "@/lib/i18n";
@@ -42,7 +43,7 @@ export default async function CategoryPage({ params, searchParams }: Props) {
     page: requested.page,
   };
 
-  const client = CommerceApiClient.fromEnv(locale);
+  const client = await commerceApiForServer(locale);
   let category: CategoryPageData;
   try {
     category = await client.getCategory(slug, {

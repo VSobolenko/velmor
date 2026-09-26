@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
+from datetime import datetime
 
 from sqlalchemy import Select, delete, func, select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
+from packages.services.src.domain.account import Account, Session
 from packages.services.src.domain.candidate import Candidate
 from packages.services.src.domain.catalogue import (
     CatalogueEntry,
@@ -629,6 +631,131 @@ class PostgresStore:
             rows = (await session.execute(statement)).mappings().all()
         return tuple(Order.model_validate(row['order']) for row in rows)
 
+    async def create_account(self, account: Account) -> bool:
+        """Write the account only when its email is free.
+
+        ``ON CONFLICT DO NOTHING`` makes a duplicate registration a row count
+        rather than a unique-violation exception, so the refusal stays a value.
+        """
+        row = self._account_row(account)
+        statement = (
+            insert(Schema.users)
+            .values(**row)
+            .on_conflict_do_nothing(index_elements=['email'])
+            .returning(Schema.users.c.account_id)
+        )
+        async with self._session_factory() as session:
+            result = await session.execute(statement)
+            written = len(result.scalars().all())
+            await session.commit()
+        return written > 0
+
+    async def save_account(self, account: Account) -> None:
+        row = self._account_row(account)
+        statement = (
+            insert(Schema.users)
+            .values(**row)
+            .on_conflict_do_update(
+                index_elements=['account_id'],
+                set_=self._without_key(row, 'account_id'),
+            )
+        )
+        async with self._session_factory() as session:
+            await session.execute(statement)
+            await session.commit()
+
+    async def by_email(self, email: str) -> Account | None:
+        statement = select(Schema.users.c.account).where(Schema.users.c.email == email)
+        async with self._session_factory() as session:
+            row = (await session.execute(statement)).mappings().one_or_none()
+        if row is None:
+            return None
+        return Account.model_validate(row['account'])
+
+    async def by_account_id(self, account_id: str) -> Account | None:
+        statement = select(Schema.users.c.account).where(
+            Schema.users.c.account_id == account_id
+        )
+        async with self._session_factory() as session:
+            row = (await session.execute(statement)).mappings().one_or_none()
+        if row is None:
+            return None
+        return Account.model_validate(row['account'])
+
+    async def record_failed_sign_in(
+        self, account_id: str, now: datetime, window_seconds: int
+    ) -> None:
+        account = await self._account_or_raise(account_id)
+        attempts = account.failed_attempts + 1
+        within_window = (
+            account.last_failed_at is not None
+            and (now - account.last_failed_at).total_seconds() <= window_seconds
+        )
+        if not within_window:
+            attempts = 1
+        await self.save_account(
+            account.model_copy(
+                update={'failed_attempts': attempts, 'last_failed_at': now}
+            )
+        )
+
+    async def clear_failed_sign_ins(self, account_id: str) -> None:
+        account = await self._account_or_raise(account_id)
+        await self.save_account(
+            account.model_copy(update={'failed_attempts': 0, 'last_failed_at': None})
+        )
+
+    async def save_session(self, session: Session) -> None:
+        row = self._session_row(session)
+        statement = (
+            insert(Schema.sessions)
+            .values(**row)
+            .on_conflict_do_update(
+                index_elements=['token_hash'],
+                set_=self._without_key(row, 'token_hash'),
+            )
+        )
+        async with self._session_factory() as db:
+            await db.execute(statement)
+            await db.commit()
+
+    async def by_token_hash(self, token_hash: str) -> Session | None:
+        statement = select(Schema.sessions.c.session).where(
+            Schema.sessions.c.token_hash == token_hash
+        )
+        async with self._session_factory() as db:
+            row = (await db.execute(statement)).mappings().one_or_none()
+        if row is None:
+            return None
+        return Session.model_validate(row['session'])
+
+    async def revoke_session(self, token_hash: str, now: datetime) -> None:
+        stored = await self.by_token_hash(token_hash)
+        if stored is None:
+            return
+        await self.save_session(stored.model_copy(update={'revoked_at': now}))
+
+    async def revoke_other_sessions(
+        self, user_id: str, token_hash: str, now: datetime
+    ) -> None:
+        statement = select(Schema.sessions.c.session).where(
+            Schema.sessions.c.user_id == user_id
+        )
+        async with self._session_factory() as db:
+            rows = (await db.execute(statement)).mappings().all()
+        for row in rows:
+            stored = Session.model_validate(row['session'])
+            if stored.token_hash != token_hash:
+                await self.save_session(
+                    stored.model_copy(update={'revoked_at': now})
+                )
+
+    async def _account_or_raise(self, account_id: str) -> Account:
+        account = await self.by_account_id(account_id)
+        if account is None:
+            raise ValueError(f'no account {account_id} to update')
+        return account
+
     @staticmethod
     def _row_for(candidate: Candidate) -> dict:
         return {
@@ -714,3 +841,31 @@ class PostgresStore:
             download_url=row['download_url'],
             size_bytes=row['size_bytes'],
         )
+
+    @staticmethod
+    def _account_row(account: Account) -> dict[str, object]:
+        """Every column of ``users`` from the model, so none can fall behind."""
+        return {
+            'account_id': account.account_id,
+            'email': account.email,
+            'account': account.model_dump(mode='json'),
+            'failed_attempts': account.failed_attempts,
+            'last_failed_at': account.last_failed_at,
+        }
+
+    @staticmethod
+    def _session_row(session: Session) -> dict[str, object]:
+        """Every column of ``sessions`` from the model, so none can fall behind."""
+        return {
+            'token_hash': session.token_hash,
+            'user_id': session.user_id,
+            'created_at': session.created_at,
+            'expires_at': session.expires_at,
+            'revoked_at': session.revoked_at,
+            'session': session.model_dump(mode='json'),
+        }
+
+    @staticmethod
+    def _without_key(row: dict[str, object], key: str) -> dict[str, object]:
+        """The upsert SET clause: every written column but the conflict target."""
+        return {name: value for name, value in row.items() if name != key}

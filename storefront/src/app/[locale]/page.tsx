@@ -8,11 +8,11 @@ import { TrustStrip } from "@/components/TrustStrip";
 import { buttonClassName } from "@/components/ui/Button";
 import { EmptyState } from "@/components/ui/EmptyState";
 import {
-  CommerceApiClient,
   CommerceApiError,
   type CatalogueCard,
   type CategorySummary,
 } from "@/lib/api";
+import { commerceApiForServer } from "@/lib/api/server";
 import { dictionaryFor, resolveLocale, type Locale } from "@/lib/i18n";
 import { localePath } from "@/lib/i18n/paths";
 
@@ -28,7 +28,7 @@ type HomeData =
 type Props = { params: Promise<{ locale: string }> };
 
 async function loadHome(locale: Locale): Promise<HomeData> {
-  const client = CommerceApiClient.fromEnv(locale);
+  const client = await commerceApiForServer(locale);
   const [categories, featured] = await Promise.all([
     client.listCategories(),
     client.listGoods({ limit: FEATURED_LIMIT }),

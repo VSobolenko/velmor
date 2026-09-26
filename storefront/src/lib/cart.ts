@@ -6,17 +6,13 @@ export type CartLine = {
   title: string;
 };
 
-function buyerId(): string {
-  const value = process.env.NEXT_PUBLIC_BUYER_ID;
-  if (value === undefined || value === "") {
-    throw new Error("NEXT_PUBLIC_BUYER_ID is required");
-  }
-  return value;
-}
-
-/** Buyer-scoped key so demo buyers do not share a cart. */
+/**
+ * One cart per browser, not per buyer. A cart is not owned by an account, and keeping the key
+ * free of the session is what lets goods added before signing in survive the sign-in and
+ * sign-out transitions unchanged.
+ */
 export function cartStorageKey(): string {
-  return `velmor.cart.${buyerId()}`;
+  return "velmor.cart";
 }
 
 const DECIMAL_AMOUNT = /^-?\d+(\.\d+)?$/;

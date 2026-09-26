@@ -22,6 +22,7 @@ from packages.api.src.configs.settings import CommerceSettings
 from packages.core.src.bootstrap.environment import Environment
 from packages.core.src.bootstrap.observability import Observability
 from packages.core.src.bootstrap.settings_loader import SettingsLoader
+from packages.services.src.auth.service import AccountService
 from packages.services.src.commerce.asset_cache import AssetCache
 from packages.services.src.commerce.catalogue_service import StorefrontCatalogue
 from packages.services.src.commerce.checkout import CheckoutService
@@ -116,6 +117,15 @@ class ApiServer:
             http=http,
             derivative=PreviewDerivative(cache),
         )
+        accounts = AccountService(
+            accounts=store,
+            sessions=store,
+            clock=lambda: datetime.now(UTC),
+            password_min_length=self._settings.password_min_length,
+            failed_attempt_limit=self._settings.failed_attempt_limit,
+            failed_attempt_window_seconds=self._settings.failed_attempt_window_seconds,
+            session_lifetime_seconds=self._settings.session_lifetime_seconds,
+        )
 
         @asynccontextmanager
         async def lifespan(_app: FastAPI):
@@ -139,6 +149,10 @@ class ApiServer:
             orders=store,
             operator_refund_key=self._settings.operator_refund_key,
             storefront_domain=self._settings.storefront_domain,
+            accounts=accounts,
+            session_cookie_name=self._settings.session_cookie_name,
+            session_lifetime_seconds=self._settings.session_lifetime_seconds,
+            password_min_length=self._settings.password_min_length,
             stub=stub,
             lifespan=lifespan,
         ).build()

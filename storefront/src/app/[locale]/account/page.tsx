@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { accountGate } from "@/components/AccountGate";
 import { Card } from "@/components/ui/Card";
 import { dictionaryFor, resolveLocale } from "@/lib/i18n";
 import { localePath } from "@/lib/i18n/paths";
@@ -11,7 +12,16 @@ export default async function AccountPage({ params }: Props) {
   const { locale: rawLocale } = await params;
   const locale = resolveLocale(rawLocale);
   const dict = dictionaryFor(locale);
+  const gate = await accountGate(locale);
+  if (!gate.allowed) {
+    return gate.node;
+  }
   const entries = [
+    {
+      href: localePath(locale, "/account/profile"),
+      title: dict["account.profile"],
+      hint: dict["account.profileHint"],
+    },
     {
       href: localePath(locale, "/account/orders"),
       title: dict["account.orders"],
@@ -22,6 +32,11 @@ export default async function AccountPage({ params }: Props) {
       title: dict["account.entitlements"],
       hint: dict["account.entitlementsHint"],
     },
+    {
+      href: localePath(locale, "/account/password"),
+      title: dict["account.changePassword"],
+      hint: dict["account.passwordHint"],
+    },
   ];
 
   return (
@@ -29,9 +44,6 @@ export default async function AccountPage({ params }: Props) {
       <h1 className="font-heading text-2xl font-semibold text-ink">
         {dict["account.title"]}
       </h1>
-      <p className="max-w-prose text-sm text-muted">
-        {dict["account.demoNote"]}
-      </p>
       <ul className="grid gap-gutter sm:grid-cols-2">
         {entries.map((entry) => (
           <li key={entry.href}>

@@ -7,7 +7,7 @@
     "build": "next build",
     "start": "next start",
     "check:i18n": "node scripts/check-i18n.mjs",
-    "lint": "npm run check:i18n && eslint",
+    "lint": "npm run check:i18n && npm run test:i18n && eslint",
     "test:i18n": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --test \"test/**/*.test.ts\""
   },
   "dependencies": {

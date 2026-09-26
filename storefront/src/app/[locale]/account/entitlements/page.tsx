@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { accountGate } from "@/components/AccountGate";
 import { DownloadButton } from "@/components/DownloadButton";
 import { Badge } from "@/components/ui/Badge";
 import { buttonClassName } from "@/components/ui/Button";
@@ -6,11 +7,11 @@ import { Card } from "@/components/ui/Card";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { ErrorState } from "@/components/ui/ErrorState";
 import {
-  CommerceApiClient,
   CommerceApiError,
   type CatalogueCard,
   type Entitlement,
 } from "@/lib/api";
+import { commerceApiForServer } from "@/lib/api/server";
 import { formatInstant } from "@/lib/format";
 import { dictionaryFor, resolveLocale, type Locale } from "@/lib/i18n";
 import { localePath } from "@/lib/i18n/paths";
@@ -65,7 +66,7 @@ function resolvedTitle(
 }
 
 async function loadEntitlements(locale: Locale): Promise<EntitlementsData> {
-  const client = CommerceApiClient.fromEnv(locale);
+  const client = await commerceApiForServer(locale);
   const entitlements = await client.listEntitlements();
   const settled = await Promise.allSettled(
     entitlements.map((entitlement) =>
@@ -83,6 +84,10 @@ export default async function EntitlementsPage({ params }: Props) {
   const { locale: rawLocale } = await params;
   const locale = resolveLocale(rawLocale);
   const dict = dictionaryFor(locale);
+  const gate = await accountGate(locale);
+  if (!gate.allowed) {
+    return gate.node;
+  }
 
   let data: EntitlementsData;
   try {
@@ -155,7 +160,7 @@ export default async function EntitlementsPage({ params }: Props) {
                     {`${dict["account.granted"]} ${formatInstant(entitlement.granted_at, locale)}`}
                     {entitlement.order_id === "" ? null : (
                       <>
-                        {" · "}
+                        {" \u00b7 "}
                         <Link
                           className="hover:underline"
                           href={localePath(

@@ -1,10 +1,12 @@
 import type { Locale } from "@/lib/i18n";
 import type {
+  BuyerProfile,
   CatalogueCard,
   CataloguePage,
   CatalogueQuery,
   CategoryPage,
   CategorySummary,
+  ChangePasswordRequest,
   CheckoutDisclosureResponse,
   CheckoutStartRequest,
   CheckoutStartResponse,
@@ -12,58 +14,109 @@ import type {
   GrantResponse,
   HealthResponse,
   Order,
+  RegisterRequest,
+  SignInRequest,
 } from "./types";
-
-const BUYER_HEADER = "X-Buyer-Id";
 
 /**
  * How the API answered a non-2xx status.
  *
- * `refusal` is a documented business response: `detail` is a sentence the API wrote for a
- * person and the storefront may show it. `fault` is a validation rejection (422) or a server
- * fault (5xx), and also any body that is not the API's `{"detail": string}` envelope: its
- * `detail` is a diagnostic for logs and the caller must render a localized generic message
- * instead of showing it.
+ * `refusal` is a documented business response. `fault` is a validation rejection (422), a
+ * server fault (5xx), or any body that is not the API's JSON envelope.
  */
 export type CommerceApiFailure = "refusal" | "fault";
 
-type ReadFailure = { detail: string; reason: CommerceApiFailure };
+/**
+ * The stable machine codes the API returns on a refusal. The storefront switches on one of
+ * these to choose a locale key. The `detail` string beside a code is a sentence the API wrote
+ * for logs and developers, and is never rendered to a buyer.
+ */
+export type CommerceApiRefusalReason =
+  | "email_required"
+  | "email_unavailable"
+  | "invalid_credentials"
+  | "password_too_short"
+  | "current_password_incorrect"
+  | "rate_limited"
+  | "unauthenticated";
+
+const REFUSAL_REASONS: readonly CommerceApiRefusalReason[] = [
+  "email_required",
+  "email_unavailable",
+  "invalid_credentials",
+  "password_too_short",
+  "current_password_incorrect",
+  "rate_limited",
+  "unauthenticated",
+];
+
+/**
+ * A refusal code, `refusal` when the API sent no recognised code, or `fault` for a non-refusal
+ * answer. A code the storefront does not recognise falls back to a generic localized message.
+ */
+export type CommerceApiReason = CommerceApiFailure | CommerceApiRefusalReason;
+
+type ReadFailure = {
+  detail: string;
+  reason: CommerceApiReason;
+  minimumLength: number | null;
+};
 
 export class CommerceApiError extends Error {
   readonly status: number;
   readonly detail: string;
-  readonly reason: CommerceApiFailure;
+  readonly reason: CommerceApiReason;
+  /** The API-owned minimum password length, present only on `password_too_short`. */
+  readonly minimumLength: number | null;
 
-  constructor(status: number, detail: string, reason: CommerceApiFailure) {
+  constructor(
+    status: number,
+    detail: string,
+    reason: CommerceApiReason,
+    minimumLength: number | null = null,
+  ) {
     super(detail);
     this.name = "CommerceApiError";
     this.status = status;
     this.detail = detail;
     this.reason = reason;
+    this.minimumLength = minimumLength;
   }
 }
 
 export class CommerceApiClient {
   private readonly baseUrl: string;
-  private readonly buyerId: string;
   private readonly locale: Locale;
+  private readonly cookie: string | null;
 
-  constructor(baseUrl: string, buyerId: string, locale: Locale) {
+  private constructor(baseUrl: string, locale: Locale, cookie: string | null) {
     this.baseUrl = baseUrl.replace(/\/$/, "");
-    this.buyerId = buyerId;
     this.locale = locale;
+    this.cookie = cookie;
   }
 
+  /**
+   * A browser client. The base is the shop's own origin, so the session cookie the API set is
+   * sent first-party and automatically: a same-origin request needs no `credentials` option,
+   * and no buyer-identifying header exists any more.
+   */
   static fromEnv(locale: Locale): CommerceApiClient {
-    const baseUrl = process.env.NEXT_PUBLIC_VELMOR_API_URL;
-    const buyerId = process.env.NEXT_PUBLIC_BUYER_ID;
-    if (baseUrl === undefined || baseUrl === "") {
-      throw new Error("NEXT_PUBLIC_VELMOR_API_URL is required");
-    }
-    if (buyerId === undefined || buyerId === "") {
-      throw new Error("NEXT_PUBLIC_BUYER_ID is required");
-    }
-    return new CommerceApiClient(baseUrl, buyerId, locale);
+    return new CommerceApiClient("/api", locale, null);
+  }
+
+  /**
+   * A server client. `cookie` is the caller's `Cookie` header, resolved with `cookies()` by
+   * `api/server.ts`, because a `fetch` made on the Next server does not run in the browser and
+   * therefore carries no cookie of its own. Without it every account page renders signed out.
+   *
+   * `baseUrl` is absolute: a server-side `fetch` cannot resolve a relative `/api`.
+   */
+  static fromServer(
+    baseUrl: string,
+    locale: Locale,
+    cookie: string,
+  ): CommerceApiClient {
+    return new CommerceApiClient(baseUrl, locale, cookie);
   }
 
   /**
@@ -85,14 +138,13 @@ export class CommerceApiClient {
   }
 
   async getHealth(): Promise<HealthResponse> {
-    return this.requestJson<HealthResponse>("GET", "/health", false);
+    return this.requestJson<HealthResponse>("GET", "/health");
   }
 
   async listCategories(): Promise<CategorySummary[]> {
     return this.requestJson<CategorySummary[]>(
       "GET",
       this.cataloguePath("/catalogue/categories", {}),
-      false,
     );
   }
 
@@ -106,7 +158,6 @@ export class CommerceApiClient {
         limit: query.limit,
         offset: query.offset,
       }),
-      false,
     );
   }
 
@@ -121,7 +172,6 @@ export class CommerceApiClient {
         limit: query.limit,
         offset: query.offset,
       }),
-      false,
     );
   }
 
@@ -140,7 +190,6 @@ export class CommerceApiClient {
     return this.requestJson<CatalogueCard>(
       "GET",
       this.cataloguePath(`/catalogue/goods/${candidateId}`, {}),
-      false,
     );
   }
 
@@ -148,12 +197,11 @@ export class CommerceApiClient {
     return this.requestJson<CheckoutDisclosureResponse>(
       "GET",
       "/checkout/disclosure",
-      false,
     );
   }
 
   async listCheckoutProviders(): Promise<string[]> {
-    return this.requestJson<string[]>("GET", "/checkout/providers", false);
+    return this.requestJson<string[]>("GET", "/checkout/providers");
   }
 
   async startCheckout(
@@ -162,24 +210,42 @@ export class CommerceApiClient {
     return this.requestJson<CheckoutStartResponse>(
       "POST",
       "/checkout/start",
-      true,
       body,
     );
   }
 
+  async register(body: RegisterRequest): Promise<BuyerProfile> {
+    return this.requestJson<BuyerProfile>("POST", "/auth/register", body);
+  }
+
+  async signIn(body: SignInRequest): Promise<BuyerProfile> {
+    return this.requestJson<BuyerProfile>("POST", "/auth/session", body);
+  }
+
+  async signOut(): Promise<void> {
+    await this.requestEmpty("DELETE", "/auth/session");
+  }
+
+  async getProfile(): Promise<BuyerProfile> {
+    return this.requestJson<BuyerProfile>("GET", "/auth/me");
+  }
+
+  async changePassword(body: ChangePasswordRequest): Promise<void> {
+    await this.requestEmpty("POST", "/auth/password", body);
+  }
+
   async listEntitlements(): Promise<Entitlement[]> {
-    return this.requestJson<Entitlement[]>("GET", "/account/entitlements", true);
+    return this.requestJson<Entitlement[]>("GET", "/account/entitlements");
   }
 
   async listOrders(): Promise<Order[]> {
-    return this.requestJson<Order[]>("GET", "/account/orders", true);
+    return this.requestJson<Order[]>("GET", "/account/orders");
   }
 
   async getOrder(orderId: string): Promise<Order> {
     return this.requestJson<Order>(
       "GET",
       `/account/orders/${encodeURIComponent(orderId)}`,
-      true,
     );
   }
 
@@ -187,29 +253,24 @@ export class CommerceApiClient {
     return this.requestJson<GrantResponse>(
       "POST",
       `/account/goods/${encodeURIComponent(candidateId)}/grant`,
-      true,
     );
   }
 
-  /** Absolute URL for the download grant endpoint (needs X-Buyer-Id). */
+  /** The grant download address, on the shop's own origin so the session cookie reaches it. */
   downloadUrl(token: string): string {
     return `${this.baseUrl}/downloads/${encodeURIComponent(token)}`;
   }
 
   /**
-   * Fetch granted bytes with the buyer header and trigger a browser save.
-   * A bare navigation to {@link downloadUrl} cannot send X-Buyer-Id.
+   * Fetch granted bytes and trigger a browser save. The request carries the session cookie,
+   * which a same-origin call sends automatically; the `X-Buyer-Id` header this once set is gone
+   * with the header itself.
    */
   async saveDownload(token: string, filename: string): Promise<void> {
-    const response = await fetch(this.downloadUrl(token), {
-      method: "GET",
-      headers: { [BUYER_HEADER]: this.buyerId },
-      cache: "no-store",
-    });
-    if (!response.ok) {
-      const failure = await this.readFailure(response);
-      throw new CommerceApiError(response.status, failure.detail, failure.reason);
-    }
+    const response = await this.request(
+      "GET",
+      `/downloads/${encodeURIComponent(token)}`,
+    );
     const blob = await response.blob();
     const objectUrl = URL.createObjectURL(blob);
     const anchor = document.createElement("a");
@@ -219,15 +280,16 @@ export class CommerceApiClient {
     URL.revokeObjectURL(objectUrl);
   }
 
-  private async requestJson<T>(
+  private async request(
     method: string,
     path: string,
-    withBuyer: boolean,
     body?: unknown,
-  ): Promise<T> {
+  ): Promise<Response> {
     const headers: Record<string, string> = {};
-    if (withBuyer) {
-      headers[BUYER_HEADER] = this.buyerId;
+    if (this.cookie !== null) {
+      // The server path: the browser's cookie does not travel on its own, so it is attached
+      // here. The browser path leaves it out and the same-origin request carries it anyway.
+      headers.Cookie = this.cookie;
     }
     if (body !== undefined) {
       headers["Content-Type"] = "application/json";
@@ -240,16 +302,39 @@ export class CommerceApiClient {
     });
     if (!response.ok) {
       const failure = await this.readFailure(response);
-      throw new CommerceApiError(response.status, failure.detail, failure.reason);
+      throw new CommerceApiError(
+        response.status,
+        failure.detail,
+        failure.reason,
+        failure.minimumLength,
+      );
     }
+    return response;
+  }
+
+  private async requestJson<T>(
+    method: string,
+    path: string,
+    body?: unknown,
+  ): Promise<T> {
+    const response = await this.request(method, path, body);
     return (await response.json()) as T;
+  }
+
+  /** A route that answers with no body, such as signing out. */
+  private async requestEmpty(
+    method: string,
+    path: string,
+    body?: unknown,
+  ): Promise<void> {
+    await this.request(method, path, body);
   }
 
   /**
    * Classifies a non-2xx body. A 422 (FastAPI validation) or a 5xx is a fault, and so is any
    * body that is not the API's JSON envelope: those are machine payloads and a caller must not
-   * print them. Only a `{"detail": "<sentence>"}` on a non-fault status is a refusal the
-   * storefront may show as written.
+   * print them. A documented refusal carries a stable `reason` code, which is what a caller
+   * maps to a locale key in place of the `detail` sentence beside it.
    */
   private async readFailure(response: Response): Promise<ReadFailure> {
     const text = await response.text();
@@ -258,17 +343,23 @@ export class CommerceApiClient {
       return {
         detail: text === "" ? status : text,
         reason: "fault",
+        minimumLength: null,
       };
     }
-    const message = this.stringDetail(JSON.parse(text));
+    const parsed: unknown = JSON.parse(text);
+    const message = this.stringDetail(parsed);
     if (
       response.status === 422 ||
       response.status >= 500 ||
       message === null
     ) {
-      return { detail: message ?? status, reason: "fault" };
+      return { detail: message ?? status, reason: "fault", minimumLength: null };
     }
-    return { detail: message, reason: "refusal" };
+    return {
+      detail: message,
+      reason: this.refusalReason(parsed) ?? "refusal",
+      minimumLength: this.minimumLengthOf(parsed),
+    };
   }
 
   /** The API's human-readable message, or `null` when `detail` is a machine payload. */
@@ -282,5 +373,30 @@ export class CommerceApiClient {
       return (parsed as { detail: string }).detail;
     }
     return null;
+  }
+
+  /** The API's stable refusal code, or `null` when it sent none or one this build does not know. */
+  private refusalReason(parsed: unknown): CommerceApiRefusalReason | null {
+    if (typeof parsed !== "object" || parsed === null || !("reason" in parsed)) {
+      return null;
+    }
+    const value = (parsed as { reason: unknown }).reason;
+    if (typeof value !== "string") {
+      return null;
+    }
+    return REFUSAL_REASONS.find((reason) => reason === value) ?? null;
+  }
+
+  /** The API-owned minimum password length, or `null` when this refusal does not carry one. */
+  private minimumLengthOf(parsed: unknown): number | null {
+    if (
+      typeof parsed !== "object" ||
+      parsed === null ||
+      !("minimum_length" in parsed)
+    ) {
+      return null;
+    }
+    const value = (parsed as { minimum_length: unknown }).minimum_length;
+    return typeof value === "number" && Number.isInteger(value) ? value : null;
   }
 }

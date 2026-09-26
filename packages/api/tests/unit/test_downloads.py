@@ -10,7 +10,14 @@ from fastapi.testclient import TestClient
 from pydantic import SecretStr
 
 from packages.api.src.app import ApiApplication
-from packages.api.tests.unit.storefront_services import build_catalogue, build_preview
+from packages.api.tests.unit.storefront_services import (
+    TEST_PASSWORD_MIN_LENGTH,
+    TEST_SESSION_COOKIE_NAME,
+    TEST_SESSION_LIFETIME_SECONDS,
+    build_accounts,
+    build_catalogue,
+    build_preview,
+)
 from packages.services.src.commerce.asset_cache import AssetCache
 from packages.services.src.commerce.checkout import CheckoutService
 from packages.services.src.commerce.delivery import DeliveryService
@@ -26,8 +33,10 @@ from packages.services.tests.unit.payments.test_bepaid_provider import (
 )
 
 ORIGIN_URL = 'https://secret-origin.example/never-leak/asset.bin'
-BUYER_ID = 'buyer-1'
-OTHER_BUYER = 'buyer-2'
+BUYER_EMAIL = 'download-buyer@example.test'
+OTHER_EMAIL = 'other-download-buyer@example.test'
+BUYER_PASSWORD = 'a sufficiently long download password'
+BUYER_NAME = 'Download Buyer'
 CANDIDATE_ID = 'openverse:1'
 PAYLOAD = b'entitled-download-bytes'
 DIGEST = hashlib.sha256(PAYLOAD).hexdigest()
@@ -35,7 +44,6 @@ NOW = datetime(2026, 9, 20, 12, 0, tzinfo=UTC)
 EARLIER = datetime(2026, 9, 19, 8, 0, tzinfo=UTC)
 SECRET = SecretStr('api-unit-delivery-grant-secret')
 LIFETIME = 900
-BUYER_HEADER = 'X-Buyer-Id'
 OPERATOR_KEY = SecretStr('api-unit-operator-refund-key')
 BEPAID_NOTIFICATION = 'https://shop.example/webhooks/bepaid'
 CATALOGUE_UNIT_AMOUNT = Decimal('9.99')
@@ -70,7 +78,7 @@ def build_entry(*, origin_url: str = ORIGIN_URL) -> CatalogueEntry:
 
 def build_entitlement(
     *,
-    buyer_id: str = BUYER_ID,
+    buyer_id: str,
     state: EntitlementState = EntitlementState.ACTIVE,
     order_id: str = 'order-1',
     revoked_at: datetime | None = None,
@@ -125,36 +133,62 @@ class DownloadHarness:
             entitlements=self.store,
             providers={'stripe': stripe, 'bepaid': bepaid},
         )
-        self.client = TestClient(
-            ApiApplication(
-                'test',
-                grants=self.grants,
-                delivery=self.delivery,
-                entitlements=self.store,
-                clock=self.clock,
-                checkout=checkout,
-                disclosures=self.store,
-                stripe=stripe,
-                bepaid=bepaid,
-                orders=self.store,
-                operator_refund_key=OPERATOR_KEY,
-                catalogue=build_catalogue(self.store, CATALOGUE_UNIT_AMOUNT, CATALOGUE_CURRENCY),
-                preview=build_preview(self.store, self.cache, self.http),
-                storefront_domain='shop.example',
-            ).build()
+        self.app = ApiApplication(
+            'test',
+            grants=self.grants,
+            delivery=self.delivery,
+            entitlements=self.store,
+            clock=self.clock,
+            checkout=checkout,
+            disclosures=self.store,
+            stripe=stripe,
+            bepaid=bepaid,
+            orders=self.store,
+            operator_refund_key=OPERATOR_KEY,
+            catalogue=build_catalogue(
+                self.store, CATALOGUE_UNIT_AMOUNT, CATALOGUE_CURRENCY
+            ),
+            preview=build_preview(self.store, self.cache, self.http),
+            storefront_domain='shop.example',
+            accounts=build_accounts(self.store, self.clock),
+            session_cookie_name=TEST_SESSION_COOKIE_NAME,
+            session_lifetime_seconds=TEST_SESSION_LIFETIME_SECONDS,
+            password_min_length=TEST_PASSWORD_MIN_LENGTH,
+        ).build()
+        # ``https`` because the session cookie is ``Secure``.
+        self.client = self.new_client()
+        self.buyer_id = self.register(self.client, BUYER_EMAIL)
+
+    def new_client(self) -> TestClient:
+        """A client with its own cookie jar over the same app."""
+        return TestClient(self.app, base_url='https://testserver')
+
+    def register(self, client: TestClient, email: str) -> str:
+        """Create an account and leave the client holding its session cookie."""
+        response = client.post(
+            '/auth/register',
+            json={
+                'email': email,
+                'password': BUYER_PASSWORD,
+                'display_name': BUYER_NAME,
+            },
         )
+        assert response.status_code == 201, response.text
+        return response.json()['id']
+
+    def other_buyer(self) -> tuple[TestClient, str]:
+        """A second signed-in buyer, isolated by its own cookie jar."""
+        client = self.new_client()
+        return client, self.register(client, OTHER_EMAIL)
 
 
 class TestDownloadRoutes:
     async def test_post_grant_entitled_buyer_gets_token(self, tmp_path: Path) -> None:
         harness = DownloadHarness(tmp_path)
         await harness.store.save_entry(build_entry())
-        await harness.store.save_entitlement(build_entitlement())
+        await harness.store.save_entitlement(build_entitlement(buyer_id=harness.buyer_id))
 
-        response = harness.client.post(
-            f'/account/goods/{CANDIDATE_ID}/grant',
-            headers={BUYER_HEADER: BUYER_ID},
-        )
+        response = harness.client.post(f'/account/goods/{CANDIDATE_ID}/grant')
 
         assert response.status_code == 200
         body = response.json()
@@ -168,33 +202,29 @@ class TestDownloadRoutes:
         harness = DownloadHarness(tmp_path)
         await harness.store.save_entry(build_entry())
 
-        response = harness.client.post(
-            f'/account/goods/{CANDIDATE_ID}/grant',
-            headers={BUYER_HEADER: BUYER_ID},
-        )
+        response = harness.client.post(f'/account/goods/{CANDIDATE_ID}/grant')
 
         assert response.status_code == 403
         assert 'detail' in response.json()
         assert ORIGIN_URL not in response.text
 
-    def test_post_grant_missing_buyer_header_is_401(self, tmp_path: Path) -> None:
+    def test_post_grant_without_a_session_is_401(self, tmp_path: Path) -> None:
         harness = DownloadHarness(tmp_path)
 
-        response = harness.client.post(f'/account/goods/{CANDIDATE_ID}/grant')
+        response = harness.new_client().post(
+            f'/account/goods/{CANDIDATE_ID}/grant'
+        )
 
         assert response.status_code == 401
-        assert 'detail' in response.json()
+        assert response.json()['reason'] == ApiApplication.UNAUTHENTICATED
 
     async def test_get_download_valid_grant_returns_bytes(self, tmp_path: Path) -> None:
         harness = DownloadHarness(tmp_path)
         await harness.store.save_entry(build_entry())
-        await harness.store.save_entitlement(build_entitlement())
-        token, _grant = harness.grants.issue(BUYER_ID, CANDIDATE_ID, NOW)
+        await harness.store.save_entitlement(build_entitlement(buyer_id=harness.buyer_id))
+        token, _grant = harness.grants.issue(harness.buyer_id, CANDIDATE_ID, NOW)
 
-        response = harness.client.get(
-            f'/downloads/{token}',
-            headers={BUYER_HEADER: BUYER_ID},
-        )
+        response = harness.client.get(f'/downloads/{token}')
 
         assert response.status_code == 200
         assert response.content == PAYLOAD
@@ -209,18 +239,16 @@ class TestDownloadRoutes:
     async def test_get_download_wrong_buyer_is_403(self, tmp_path: Path) -> None:
         harness = DownloadHarness(tmp_path)
         await harness.store.save_entry(build_entry())
-        await harness.store.save_entitlement(build_entitlement())
+        await harness.store.save_entitlement(build_entitlement(buyer_id=harness.buyer_id))
+        other_client, other_id = harness.other_buyer()
         # Entitle the other buyer too so a verify that ignores buyer_id would
         # reach delivery successfully; the 403 must come from grant binding.
         await harness.store.save_entitlement(
-            build_entitlement(buyer_id=OTHER_BUYER, order_id='order-other')
+            build_entitlement(buyer_id=other_id, order_id='order-other')
         )
-        token, _grant = harness.grants.issue(BUYER_ID, CANDIDATE_ID, NOW)
+        token, _grant = harness.grants.issue(harness.buyer_id, CANDIDATE_ID, NOW)
 
-        response = harness.client.get(
-            f'/downloads/{token}',
-            headers={BUYER_HEADER: OTHER_BUYER},
-        )
+        response = other_client.get(f'/downloads/{token}')
 
         assert response.status_code == 403
         assert 'detail' in response.json()
@@ -229,14 +257,11 @@ class TestDownloadRoutes:
     async def test_get_download_expired_grant_is_403(self, tmp_path: Path) -> None:
         harness = DownloadHarness(tmp_path)
         await harness.store.save_entry(build_entry())
-        await harness.store.save_entitlement(build_entitlement())
-        token, grant = harness.grants.issue(BUYER_ID, CANDIDATE_ID, NOW)
+        await harness.store.save_entitlement(build_entitlement(buyer_id=harness.buyer_id))
+        token, grant = harness.grants.issue(harness.buyer_id, CANDIDATE_ID, NOW)
         harness.clock.instant = grant.expires_at
 
-        response = harness.client.get(
-            f'/downloads/{token}',
-            headers={BUYER_HEADER: BUYER_ID},
-        )
+        response = harness.client.get(f'/downloads/{token}')
 
         assert response.status_code == 403
         body = response.json()
@@ -251,17 +276,15 @@ class TestDownloadRoutes:
         await harness.store.save_entry(build_entry())
         await harness.store.save_entitlement(
             build_entitlement(
+                buyer_id=harness.buyer_id,
                 state=EntitlementState.REVOKED,
                 revoked_at=EARLIER,
                 revocation_reason='chargeback',
             )
         )
-        token, _grant = harness.grants.issue(BUYER_ID, CANDIDATE_ID, NOW)
+        token, _grant = harness.grants.issue(harness.buyer_id, CANDIDATE_ID, NOW)
 
-        response = harness.client.get(
-            f'/downloads/{token}',
-            headers={BUYER_HEADER: BUYER_ID},
-        )
+        response = harness.client.get(f'/downloads/{token}')
 
         assert response.status_code == 403
         body = response.json()

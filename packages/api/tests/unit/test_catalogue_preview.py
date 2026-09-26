@@ -12,7 +12,14 @@ from PIL import Image
 from pydantic import SecretStr
 
 from packages.api.src.app import ApiApplication
-from packages.api.tests.unit.storefront_services import build_catalogue, build_preview
+from packages.api.tests.unit.storefront_services import (
+    TEST_PASSWORD_MIN_LENGTH,
+    TEST_SESSION_COOKIE_NAME,
+    TEST_SESSION_LIFETIME_SECONDS,
+    build_accounts,
+    build_catalogue,
+    build_preview,
+)
 from packages.services.src.commerce.asset_cache import AssetCache
 from packages.services.src.commerce.checkout import CheckoutService
 from packages.services.src.commerce.delivery import DeliveryService
@@ -92,6 +99,7 @@ class PreviewHarness:
 
         self.http = httpx.AsyncClient(transport=httpx.MockTransport(handler))
         grants = DeliveryGrantService(secret=GRANT_SECRET, lifetime_seconds=900)
+        accounts = build_accounts(self.store, lambda: NOW)
         delivery = DeliveryService(
             entitlements=self.store,
             entries=self.store,
@@ -133,6 +141,10 @@ class PreviewHarness:
                 catalogue=build_catalogue(self.store, UNIT_AMOUNT, CURRENCY),
                 preview=build_preview(self.store, self.cache, self.http),
                 storefront_domain='shop.example',
+                accounts=accounts,
+                session_cookie_name=TEST_SESSION_COOKIE_NAME,
+                session_lifetime_seconds=TEST_SESSION_LIFETIME_SECONDS,
+                password_min_length=TEST_PASSWORD_MIN_LENGTH,
             ).build()
         )
 

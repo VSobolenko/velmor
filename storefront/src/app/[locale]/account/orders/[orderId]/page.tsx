@@ -1,12 +1,14 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import { accountGate } from "@/components/AccountGate";
 import { DownloadButton } from "@/components/DownloadButton";
 import { OrderStateBadge } from "@/components/OrderStateBadge";
 import { buttonClassName } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
 import { ErrorState } from "@/components/ui/ErrorState";
 import { PriceTag } from "@/components/ui/PriceTag";
-import { CommerceApiClient, CommerceApiError, type CatalogueCard, type Order } from "@/lib/api";
+import { CommerceApiError, type CatalogueCard, type Order } from "@/lib/api";
+import { commerceApiForServer } from "@/lib/api/server";
 import { formatCount, formatInstant } from "@/lib/format";
 import { dictionaryFor, resolveLocale, type Locale } from "@/lib/i18n";
 import { localePath } from "@/lib/i18n/paths";
@@ -47,7 +49,7 @@ function resolvedTitle(
 
 async function loadOrder(locale: Locale, orderId: string): Promise<OrderData> {
   try {
-    const client = CommerceApiClient.fromEnv(locale);
+    const client = await commerceApiForServer(locale);
     const order = await client.getOrder(orderId);
     const settled = await Promise.allSettled(
       order.lines.map((line) =>
@@ -78,6 +80,10 @@ export default async function OrderDetailPage({ params }: Props) {
   const { orderId, locale: rawLocale } = await params;
   const locale = resolveLocale(rawLocale);
   const dict = dictionaryFor(locale);
+  const gate = await accountGate(locale);
+  if (!gate.allowed) {
+    return gate.node;
+  }
   const data = await loadOrder(locale, orderId);
 
   if (data.kind === "error") {
@@ -166,7 +172,7 @@ export default async function OrderDetailPage({ params }: Props) {
                       amount={line.unit_amount}
                       currency={order.currency}
                     />
-                    <span className="text-sm text-muted">{`× ${formatCount(line.quantity, locale)}`}</span>
+                    <span className="text-sm text-muted">{`\u00d7 ${formatCount(line.quantity, locale)}`}</span>
                   </span>
                 </li>
               );

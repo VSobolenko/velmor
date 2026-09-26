@@ -19,15 +19,16 @@ Open http://localhost:3000. The API must be reachable at
 | Variable | Purpose |
 |---|---|
 | `NEXT_PUBLIC_VELMOR_API_URL` | Base URL of the FastAPI commerce API |
-| `NEXT_PUBLIC_BUYER_ID` | Temporary stand-in for `X-Buyer-Id` until real auth |
 
-Both are public client values, not secrets. Do not put Stripe, bePaid, Saleor, or
+It is a public client value, not a secret. Do not put Stripe, bePaid, Saleor, or
 operator keys in this app.
 
-Buyer identity for cart persistence and account routes is `NEXT_PUBLIC_BUYER_ID`
-sent as `X-Buyer-Id`. There is no Saleor customer session yet; real authentication
-lands in a later change. The local cart key is `velmor.cart.{buyerId}` so demo
-buyers do not share lines.
+Buyer identity is the API's own session cookie. A browser request goes to the shop's
+own origin at `/api`, so the cookie travels first-party and no `X-Buyer-Id` header
+exists; a request made on the Next server carries no cookie of its own, so
+`lib/api/server.ts` reads the caller's with `cookies()` and forwards it. The cart is
+keyed `velmor.cart` for every visitor, so signing in and signing out keep the lines
+already added.
 
 ## Scripts
 

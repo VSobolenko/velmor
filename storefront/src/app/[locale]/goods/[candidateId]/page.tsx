@@ -7,10 +7,11 @@ import { StickyBuyBar } from "@/components/StickyBuyBar";
 import { buttonClassName } from "@/components/ui/Button";
 import { ErrorState } from "@/components/ui/ErrorState";
 import {
-  CommerceApiClient,
   CommerceApiError,
   type CatalogueCard,
+  type CommerceApiClient,
 } from "@/lib/api";
+import { commerceApiForServer } from "@/lib/api/server";
 import { formatFileSize, formatKeyFor } from "@/lib/format";
 import { dictionaryFor, resolveLocale } from "@/lib/i18n";
 import { localePath } from "@/lib/i18n/paths";
@@ -67,7 +68,7 @@ export default async function GoodPage({ params }: Props) {
   const { locale: rawLocale, candidateId } = await params;
   const locale = resolveLocale(rawLocale);
   const dict = dictionaryFor(locale);
-  const client = CommerceApiClient.fromEnv(locale);
+  const client = await commerceApiForServer(locale);
   const data = await loadGoodPage(client, candidateId);
 
   if (data.kind === "missing") {

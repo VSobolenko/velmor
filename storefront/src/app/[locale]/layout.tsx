@@ -5,6 +5,7 @@ import { CartProvider } from "@/components/CartProvider";
 import { SiteFooter } from "@/components/SiteFooter";
 import { SiteHeader } from "@/components/SiteHeader";
 import { ToastProvider } from "@/components/ui/Toast";
+import { readAccountState } from "@/lib/account";
 import { dictionaryFor, isLocale } from "@/lib/i18n";
 
 /**
@@ -35,6 +36,7 @@ export default async function LocaleLayout({
     notFound();
   }
   const dict = dictionaryFor(locale);
+  const account = await readAccountState(locale);
 
   return (
     <CartProvider
@@ -56,7 +58,11 @@ export default async function LocaleLayout({
         >
           {dict["common.skipToContent"]}
         </a>
-        <SiteHeader locale={locale} dict={dict} />
+        <SiteHeader
+          locale={locale}
+          dict={dict}
+          profile={account.kind === "signedIn" ? account.profile : null}
+        />
         <div id="content">{children}</div>
         <SiteFooter locale={locale} dict={dict} />
       </ToastProvider>

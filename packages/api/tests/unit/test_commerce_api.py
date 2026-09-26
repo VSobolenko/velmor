@@ -13,7 +13,14 @@ from fastapi.testclient import TestClient
 from pydantic import SecretStr
 
 from packages.api.src.app import ApiApplication
-from packages.api.tests.unit.storefront_services import build_catalogue, build_preview
+from packages.api.tests.unit.storefront_services import (
+    TEST_PASSWORD_MIN_LENGTH,
+    TEST_SESSION_COOKIE_NAME,
+    TEST_SESSION_LIFETIME_SECONDS,
+    build_accounts,
+    build_catalogue,
+    build_preview,
+)
 from packages.services.src.commerce.asset_cache import AssetCache
 from packages.services.src.commerce.checkout import CheckoutService
 from packages.services.src.commerce.delivery import DeliveryService
@@ -42,8 +49,13 @@ from packages.services.tests.unit.payments.test_stub_provider import (
 )
 
 ORIGIN_URL = 'https://secret-origin.example/never-leak/asset.bin'
-BUYER_ID = 'buyer-1'
-OTHER_BUYER = 'buyer-2'
+#: The owner is no longer a caller-supplied string: every client signs in and the
+#: account id the API mints in ``harness.buyer_id`` is what orders and
+#: entitlements are keyed by. The old ``X-Buyer-Id`` header is gone.
+BUYER_EMAIL = 'buyer-1@example.test'
+OTHER_EMAIL = 'buyer-2@example.test'
+BUYER_PASSWORD = 'a sufficiently long buyer password'
+BUYER_NAME = 'Buyer One'
 CANDIDATE_ID = 'openverse:1'
 DIGEST = hashlib.sha256(b'commerce-api-bytes').hexdigest()
 NOW = datetime(2026, 9, 20, 12, 0, tzinfo=UTC)
@@ -61,7 +73,6 @@ SESSION_ID = 'cs_test_commerce_session'
 RETURN_URL = 'https://shop.example/return'
 UNIT_AMOUNT = Decimal('10.50')
 CURRENCY = 'USD'
-BUYER_HEADER = 'X-Buyer-Id'
 OPERATOR_HEADER = 'X-Operator-Key'
 
 
@@ -196,25 +207,53 @@ class CommerceHarness:
             cache=cache,
             http=self.http,
         )
-        self.client = TestClient(
-            ApiApplication(
-                'test',
-                grants=grants,
-                delivery=delivery,
-                entitlements=self.store,
-                clock=self.clock,
-                checkout=self.checkout,
-                disclosures=self.store,
-                stripe=self.stripe,
-                bepaid=self.bepaid,
-                orders=self.store,
-                operator_refund_key=OPERATOR_KEY,
-                catalogue=build_catalogue(self.store, UNIT_AMOUNT, CURRENCY),
-                preview=build_preview(self.store, cache, self.http),
-                storefront_domain='shop.example',
-                stub=self.stub,
-            ).build()
+        self.app = ApiApplication(
+            'test',
+            grants=grants,
+            delivery=delivery,
+            entitlements=self.store,
+            clock=self.clock,
+            checkout=self.checkout,
+            disclosures=self.store,
+            stripe=self.stripe,
+            bepaid=self.bepaid,
+            orders=self.store,
+            operator_refund_key=OPERATOR_KEY,
+            catalogue=build_catalogue(self.store, UNIT_AMOUNT, CURRENCY),
+            preview=build_preview(self.store, cache, self.http),
+            storefront_domain='shop.example',
+            accounts=build_accounts(self.store, self.clock),
+            session_cookie_name=TEST_SESSION_COOKIE_NAME,
+            session_lifetime_seconds=TEST_SESSION_LIFETIME_SECONDS,
+            password_min_length=TEST_PASSWORD_MIN_LENGTH,
+            stub=self.stub,
+        ).build()
+        # ``https`` because the session cookie is ``Secure`` and an http scheme
+        # would keep it in the jar without ever sending it.
+        self.client = self.new_client()
+        self.buyer_id = self.register(self.client, BUYER_EMAIL)
+
+    def new_client(self) -> TestClient:
+        """A client with its own cookie jar over the same app."""
+        return TestClient(self.app, base_url='https://testserver')
+
+    def register(self, client: TestClient, email: str) -> str:
+        """Create an account and leave the client holding its session cookie."""
+        response = client.post(
+            '/auth/register',
+            json={
+                'email': email,
+                'password': BUYER_PASSWORD,
+                'display_name': BUYER_NAME,
+            },
         )
+        assert response.status_code == 201, response.text
+        return response.json()['id']
+
+    def other_buyer(self) -> tuple[TestClient, str]:
+        """A second signed-in buyer, isolated by its own cookie jar."""
+        client = self.new_client()
+        return client, self.register(client, OTHER_EMAIL)
 
     def start_body(
         self,
@@ -314,7 +353,6 @@ class TestCheckoutStart:
 
         response = harness.client.post(
             '/checkout/start',
-            headers={BUYER_HEADER: BUYER_ID},
             json=harness.start_body(),
         )
 
@@ -334,7 +372,6 @@ class TestCheckoutStart:
 
         response = harness.client.post(
             '/checkout/start',
-            headers={BUYER_HEADER: BUYER_ID},
             json=harness.start_body(),
         )
 
@@ -351,7 +388,6 @@ class TestCheckoutStart:
 
         free_response = harness.client.post(
             '/checkout/start',
-            headers={BUYER_HEADER: BUYER_ID},
             json=harness.start_body(),
         )
         assert free_response.status_code == 403
@@ -362,7 +398,6 @@ class TestCheckoutStart:
         )
         withdrawn_response = harness.client.post(
             '/checkout/start',
-            headers={BUYER_HEADER: BUYER_ID},
             json=harness.start_body(),
         )
         assert withdrawn_response.status_code == 403
@@ -378,7 +413,6 @@ class TestStripeWebhook:
         await harness.store.save_entry(build_entry())
         start = harness.client.post(
             '/checkout/start',
-            headers={BUYER_HEADER: BUYER_ID},
             json=harness.start_body(),
         )
         order_id = start.json()['order_id']
@@ -409,7 +443,7 @@ class TestStripeWebhook:
         order = await harness.store.by_order_id(order_id)
         assert order is not None
         assert order.state is OrderState.PAID
-        entitlements = await harness.store.for_buyer(BUYER_ID)
+        entitlements = await harness.store.for_buyer(harness.buyer_id)
         assert len(entitlements) == 1
         assert entitlements[0].state is EntitlementState.ACTIVE
 
@@ -421,7 +455,6 @@ class TestStripeWebhook:
         await harness.store.save_entry(build_entry())
         start = harness.client.post(
             '/checkout/start',
-            headers={BUYER_HEADER: BUYER_ID},
             json=harness.start_body(),
         )
         order_id = start.json()['order_id']
@@ -445,7 +478,7 @@ class TestStripeWebhook:
         order = await harness.store.by_order_id(order_id)
         assert order is not None
         assert order.state is OrderState.PENDING
-        assert await harness.store.for_buyer(BUYER_ID) == ()
+        assert await harness.store.for_buyer(harness.buyer_id) == ()
 
 
 class TestBePaidWebhook:
@@ -457,7 +490,7 @@ class TestBePaidWebhook:
         await harness.store.save_order(
             Order(
                 order_id=order_id,
-                buyer_id=BUYER_ID,
+                buyer_id=harness.buyer_id,
                 state=OrderState.PENDING,
                 currency='USD',
                 lines=(
@@ -516,7 +549,6 @@ class TestStubWebhookAndProviders:
         await harness.store.save_entry(build_entry())
         start = harness.client.post(
             '/checkout/start',
-            headers={BUYER_HEADER: BUYER_ID},
             json=harness.start_body(provider_id='stub'),
         )
         assert start.status_code == 200
@@ -554,7 +586,6 @@ class TestStubWebhookAndProviders:
         await harness.store.save_entry(build_entry())
         start = harness.client.post(
             '/checkout/start',
-            headers={BUYER_HEADER: BUYER_ID},
             json=harness.start_body(provider_id='stub'),
         )
         order_id = start.json()['order_id']
@@ -605,7 +636,6 @@ class TestAccountRoutes:
         await harness.store.save_entry(build_entry())
         start = harness.client.post(
             '/checkout/start',
-            headers={BUYER_HEADER: BUYER_ID},
             json=harness.start_body(),
         )
         order_id = start.json()['order_id']
@@ -624,34 +654,25 @@ class TestAccountRoutes:
             headers={'Stripe-Signature': signature, 'Content-Type': 'application/json'},
         )
 
-        mine = harness.client.get(
-            '/account/entitlements', headers={BUYER_HEADER: BUYER_ID}
-        )
-        other = harness.client.get(
-            '/account/entitlements', headers={BUYER_HEADER: OTHER_BUYER}
-        )
+        other_client, _other_id = harness.other_buyer()
+        mine = harness.client.get('/account/entitlements')
+        other = other_client.get('/account/entitlements')
         assert mine.status_code == 200
         assert len(mine.json()) == 1
         assert mine.json()[0]['state'] == EntitlementState.ACTIVE.value
         assert other.status_code == 200
         assert other.json() == []
 
-        orders = harness.client.get(
-            '/account/orders', headers={BUYER_HEADER: BUYER_ID}
-        )
+        orders = harness.client.get('/account/orders')
         assert orders.status_code == 200
         assert len(orders.json()) == 1
         assert orders.json()[0]['order_id'] == order_id
 
-        one = harness.client.get(
-            f'/account/orders/{order_id}', headers={BUYER_HEADER: BUYER_ID}
-        )
+        one = harness.client.get(f'/account/orders/{order_id}')
         assert one.status_code == 200
         assert one.json()['order_id'] == order_id
 
-        foreign = harness.client.get(
-            f'/account/orders/{order_id}', headers={BUYER_HEADER: OTHER_BUYER}
-        )
+        foreign = other_client.get(f'/account/orders/{order_id}')
         assert foreign.status_code == 404
 
 
@@ -662,7 +683,6 @@ class TestOperatorRefund:
         await harness.store.save_entry(build_entry())
         start = harness.client.post(
             '/checkout/start',
-            headers={BUYER_HEADER: BUYER_ID},
             json=harness.start_body(),
         )
         order_id = start.json()['order_id']
@@ -701,11 +721,8 @@ class TestOperatorRefund:
         )
         assert ok.status_code == 200
         assert ok.json()['state'] == OrderState.REFUNDED.value
-        entitlements = await harness.store.for_buyer(BUYER_ID)
+        entitlements = await harness.store.for_buyer(harness.buyer_id)
         assert entitlements[0].state is EntitlementState.REVOKED
 
-        grant = harness.client.post(
-            f'/account/goods/{CANDIDATE_ID}/grant',
-            headers={BUYER_HEADER: BUYER_ID},
-        )
+        grant = harness.client.post(f'/account/goods/{CANDIDATE_ID}/grant')
         assert grant.status_code == 403

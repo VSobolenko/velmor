@@ -17,12 +17,12 @@ import {
   type RawSearchParams,
 } from "@/components/catalogue-query";
 import {
-  CommerceApiClient,
   CommerceApiError,
   type CatalogueCard,
   type CatalogueSort,
   type CategorySummary,
 } from "@/lib/api";
+import { commerceApiForServer } from "@/lib/api/server";
 import { formatCount } from "@/lib/format";
 import { dictionaryFor, resolveLocale, type Locale } from "@/lib/i18n";
 import { localePath } from "@/lib/i18n/paths";
@@ -66,7 +66,7 @@ async function loadCatalogue(
   locale: Locale,
   params: CatalogueParams,
 ): Promise<CatalogueData> {
-  const client = CommerceApiClient.fromEnv(locale);
+  const client = await commerceApiForServer(locale);
   const [page, categories, licenceSource] = await Promise.all([
     client.listGoods({
       q: params.q === "" ? undefined : params.q,

@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Protocol, runtime_checkable
 
+from packages.services.src.domain.account import Account, Session
 from packages.services.src.domain.candidate import Candidate
 from packages.services.src.domain.catalogue import CatalogueEntry
 from packages.services.src.domain.catalogue_query import (
@@ -22,6 +24,38 @@ from packages.services.src.domain.seller import SellerDisclosure
 # rather than a table that happens to hold one. Both stores import it, so the
 # key exists in one place.
 SELLER_DISCLOSURE_KEY: str = 'seller'
+
+
+@runtime_checkable
+class AccountRepository(Protocol):
+    """Storage for buyer accounts, keyed by a case-insensitive unique email.
+
+    ``create_account`` writes only when the email is free and reports whether it
+    did, so a duplicate registration is a value rather than an exception.
+    ``record_failed_sign_in`` and ``clear_failed_sign_ins`` own the rate-limit
+    counter, which lives on the account row and nowhere else.
+    """
+
+    async def create_account(self, account: Account) -> bool: ...
+    async def save_account(self, account: Account) -> None: ...
+    async def by_email(self, email: str) -> Account | None: ...
+    async def by_account_id(self, account_id: str) -> Account | None: ...
+    async def record_failed_sign_in(
+        self, account_id: str, now: datetime, window_seconds: int
+    ) -> None: ...
+    async def clear_failed_sign_ins(self, account_id: str) -> None: ...
+
+
+@runtime_checkable
+class SessionRepository(Protocol):
+    """Storage for opaque sessions, keyed by the hash of their token."""
+
+    async def save_session(self, session: Session) -> None: ...
+    async def by_token_hash(self, token_hash: str) -> Session | None: ...
+    async def revoke_session(self, token_hash: str, now: datetime) -> None: ...
+    async def revoke_other_sessions(
+        self, user_id: str, token_hash: str, now: datetime
+    ) -> None: ...
 
 
 class CandidateRepository(Protocol):

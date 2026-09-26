@@ -8,6 +8,7 @@ import { Card } from "@/components/ui/Card";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { PriceTag } from "@/components/ui/PriceTag";
 import { cartTotal } from "@/lib/cart";
+import { useCartTitles } from "@/lib/cart-titles";
 import { dictionaryFor } from "@/lib/i18n";
 import { localePath } from "@/lib/i18n/paths";
 import { useLocale } from "@/lib/i18n/use-locale";
@@ -25,6 +26,7 @@ export default function CartPage() {
   const locale = useLocale();
   const dict = dictionaryFor(locale);
   const { lines, total, remove, setQuantity } = useCart();
+  const { lines: displayLines } = useCartTitles(lines, locale);
   const catalogueHref = localePath(locale, "/catalogue");
 
   return (
@@ -46,7 +48,7 @@ export default function CartPage() {
         <div className="grid items-start gap-gutter-lg lg:grid-cols-[minmax(0,1fr)_20rem]">
           <Card padding="none">
             <ul className="divide-y divide-line">
-              {lines.map((line) => {
+              {displayLines.map((line) => {
                 const subtotal = cartTotal([line]);
                 return (
                   <li
