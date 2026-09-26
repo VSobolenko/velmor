@@ -5,13 +5,18 @@ shop.78-111-89-46.sslip.io {
 	encode gzip
 
 	# The storefront's own origin reaches the API here, so the session cookie the API
-	# sets is first-party and `SameSite=Lax` is sufficient for it. handle_path strips
-	# the prefix: the browser calls /api/auth/session, the API sees /auth/session.
+	# sets is first-party and `SameSite=Lax` is sufficient for it. Two `handle` blocks
+	# rather than a bare `reverse_proxy` fallback: `handle` blocks are evaluated in the
+	# order they are written, so /api/* cannot be swallowed by the storefront route
+	# whatever the directive ordering would otherwise be. `handle_path` strips the
+	# prefix: the browser calls /api/auth/session, the API sees /auth/session.
 	handle_path /api/* {
 		reverse_proxy host.docker.internal:8080
 	}
 
-	reverse_proxy host.docker.internal:3000
+	handle {
+		reverse_proxy host.docker.internal:3000
+	}
 }
 
 velmor-api.78-111-89-46.sslip.io {

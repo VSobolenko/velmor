@@ -621,3 +621,195 @@ defect the next time", so the fix class matters more than the narrative.
 - Change made: none; this is a method note. The reason it is worth one: rule 08 already says a false
   positive is worse than a miss, and this one would have cost a session of work defending a working
   surface.
+
+### 2026-09-25 - `Select-String -Path` with `[locale]` silently returned 0 matches, and that near-miss discredited a correct report
+
+- Symptom: `Select-String -Path 'storefront/src/app/[locale]/account/entitlements/page.tsx' -Pattern
+  'hover:underline'` yielded nothing and `.Count` printed `0`, with no error. From that I concluded a
+  worker had named a target line that does not exist, which would have made its whole report
+  unreliable - and I was one step from telling the human so. The line exists, at the exact line
+  number the worker named: `entitlements/page.tsx:160` is `className="hover:underline"`.
+- Root cause: PowerShell reads `[locale]` in a `-Path` value as a **wildcard character class**, so the
+  argument means `storefront/src/app/` + any one of `l`,`o`,`c`,`a`,`e` + `/...`. No directory has a
+  single-character name, so nothing matched and the cmdlet returned an empty collection that `.Count`
+  reports as a confident `0`. `Get-Content` on the same string fails loudly and even suggests
+  `-LiteralPath`, but `Select-String` does not. Every path in this repository under `app/[locale]/`
+  and `goods/[candidateId]/` has this shape, so the trap is on the most-travelled path here.
+- Fix class: tooling. Use `-LiteralPath` for any repository path containing `[` or `]`, and prefer the
+  Grep/Read tools, which treat the path literally. Do not let a bare zero become a conclusion about
+  someone else's work: a zero from a search is a claim that needs a second method before it accuses
+  anyone. This is the same family as the jump-scroll entry above - my own instrument produced a false
+  result and the cost landed on a healthy artefact.
+- Evidence: `Select-String` with the bracket path -> `0`, no error; reading the file literally ->
+  line 160 `className="hover:underline"` inside the order `<Link>`; and 18 `tap-target` occurrences
+  across `storefront/src` showing every neighbouring inline link already carries
+  `tap-target inline-flex ... items-center`. So the reported defect was real and the report was right.
+
+### 2026-09-25 - a claimed hook false positive must be replayed, and the replay must be able to fail
+
+- Symptom: a worker reported that `ui-guard.cjs` denied an ASCII-only edit with "Cyrillic text in
+  storefront/src/app/[locale]/account/entitlements/page.tsx", and that replaying the logged payload
+  returned `allow` - i.e. the hook denies on the Cursor path but allows on a manual one, so it must be
+  broken. Acting on that means weakening a hook that guards the rule the shop once shipped without.
+- Root cause of the *claim*: it was not reproducible. The file carries zero Cyrillic characters (7163
+  bytes, 2 non-ASCII bytes, `C2 B7` = U+00B7 MIDDLE DOT). A faithful replay of the intended ASCII edit
+  returns `allow`; the file's whole on-disk content as a `Write` body returns `allow`.
+- Root cause of my own first attempt to check it, which is the part worth remembering: my first replay
+  put the Cyrillic in a `// comment`, and `ui-guard` strips comments before it looks, so the deny case
+  came back `allow` and the hook looked broken. **A replay whose failing case cannot fail proves
+  nothing** - the same defect the BOM entry above records, one layer out. A deny case must be a
+  construction the rule is actually about.
+- Fix class: method + sensor discipline. Replay with the payload the runtime really sends - a leading
+  U+FEFF and a `workspace_roots` entry in the url-ish drive form `/d:/...`, or the run proves nothing
+  (`lib/hook-io.cjs` documents both traps). Give every case an expected verdict, and include the
+  allow cases: a rule that fires on everything is as broken as one that fires on nothing.
+- Evidence: seven cases, each with an expected verdict, all matching. `allow`: the intended ASCII
+  edit, the file's real content, a Cyrillic string under the exempt `lib/i18n/`, and a path outside
+  the storefront. `deny`: a Cyrillic literal in code, a literal `lang="be"`, and an English literal in
+  `aria-label`. The hook is correct and the intended edit is not blocked by it; the only blocker for
+  that one-line change is `codex-gate`, because Codex was rate-limited.
+- Change made: none to the hook. Nothing was widened or bypassed.
+
+### 2026-09-25 - a brief that asserted an API contract nobody had read sent the worker to build a field the server drops
+
+- Symptom: the `cart-title-locale` diff added `title: line.title` to the lines posted to
+  `/checkout/start`. The worker implemented it faithfully and reported it. The field does nothing.
+- Root cause: the **brief** told it to. `harness/codex/prompts/ux-cart-line-locale.md` said "The checkout
+  posts these lines to `/checkout/start`. What it posts must carry the title for the language the buyer
+  is reading, so the order records what the buyer saw." I wrote that without opening the request model.
+  Read now: `packages/api/src/app.py` lines 62-69 declare `CheckoutLineBody` with exactly
+  `candidate_id`, `unit_amount`, `quantity`, `model_config = {'frozen': True}`; the handler builds the
+  domain line from exactly those three (lines 530-532); `extra` is Pydantic's default `ignore`, so the
+  extra key is dropped with no error and never reaches the order. The contract the brief promised does
+  not exist on either side of the wire.
+- Why this is worth a lesson rather than a shrug: a worker cannot tell a wrong brief from a right one -
+  it has only the brief. An unfounded contract in a brief is therefore implemented *perfectly*, which
+  is why it survives review: the code matches the instruction, and only the source disagrees. Rule 00
+  already forbids asserting an API field without reading it. What is new is where the damage lands:
+  not in the diff under review, but in the next agent's diff, one hop away from the reader who could
+  have caught it.
+- Fix class: brief discipline. Every contract a brief asserts must be read in the source and quoted in
+  the brief, with file and line. Never instruct a worker to satisfy a rule you have not located. When a
+  contract is only in prose, treat writing it into a brief as writing code.
+- Change made: `harness/codex/prompts/ux-cart-line-locale-fix.md` - the fix round, which quotes
+  `app.py:62-69` and `app.py:530-532` and retracts the instruction in the same words it was given.
+
+### 2026-09-25 - the storefront unit suite is run by no gate at all
+
+- Symptom: the one change that broke a storefront test was caught only because a brief happened to
+  order `npm --prefix storefront run test:i18n` by name. Nothing else in the harness runs it.
+- Verified, not assumed: grepping the whole repository for `test:i18n` returns exactly four places -
+  its definition in `storefront/package.json` line 11, two Codex prompt files, and a line in
+  `HANDOFF.md`. It appears in no script under `scripts/`, no hook under `.cursor/hooks/`, and the
+  quality-gate list in `AGENTS.md` names only `npm --prefix storefront run lint` and
+  `npm --prefix storefront run build`. `lint` is `check:i18n && eslint` (package.json line 10), so the
+  suite is not inside the gate that is documented either.
+- What that leaves unenforced: 55 tests, including the primitives contract (every control has a 44px
+  target, a primitive carries no Cyrillic and no hardcoded language, no primitive contains `try/catch`)
+  and the API client's path-segment contract. These are the storefront's own sensors, and the harness
+  never asks them to run. A sensor nobody runs is worse than a sensor that cannot fail, because the
+  file's existence is itself read as coverage.
+- Fix class: gate coverage, and it should be computational rather than a line of prose. Smallest closed
+  form: make the already-required `lint` run it, then have `scripts/harness-status.mjs` fail when a
+  `test:*` or `check:*` script in `storefront/package.json` is not reachable from a documented gate, so
+  the next script added cannot repeat this silently.
+- Evidence: the repository-wide grep for `test:i18n` above; `storefront/package.json` lines 7, 10, 11;
+  the measured run `pass 54 / fail 1` with `test/cart-titles.test.ts` the only failure.
+
+### 2026-09-25 - three fail-closed preToolUse hooks intermittently reported exit code 1 and blocked every write
+
+- Symptom: a `Write` of `openspec/changes/add-buyer-accounts/proposal.md` was refused with "Tool blocked
+  because this hook is configured to fail closed (block when it fails). Hook `node
+  .cursor/hooks/secret-guard.cjs` failed with exit code 1", and the same for `ui-guard` and
+  `policy-guard`. A second `Write`, to a path under the system temp directory, was refused by a
+  *different* pair - `secret-guard` and `ui-guard`. A third attempt at the same original path succeeded
+  with no change to the file or the payload.
+- Why this is a defect and not a denial: these two look alike and are not. A denial is exit 0 with a
+  verdict on stdout - measured earlier the same day when `ui-guard` denied three injected cases and
+  returned `{"permission":"deny"}` each time. Exit code 1 is a failure signature. And the identical
+  payload run directly returns `{"permission":"allow"}` with exit 0 for `secret-guard`, `ui-guard`,
+  `policy-guard` and `codex-gate`: all four call `process.exit(0)` on every path and fall back to
+  `allow()` when stdin cannot be parsed, so exit 1 cannot originate in their own logic.
+- Root cause: **not established, and this entry does not guess one.** Two candidates fit the evidence
+  and were not distinguished: the runner may not close the hook's stdin, and `hookIo.readStdin()` uses
+  `fs.readFileSync(0, 'utf8')`, which blocks until EOF - so a 10 s `timeout` would kill the process;
+  or the hook's `process.stdout.write` may hit a pipe the runner has already closed. Both are
+  intermittent and both would vary which hook is reported, which is exactly what was measured. Naming
+  a cause here without a measurement would be the defect this file exists to prevent.
+- Why it matters beyond one lost write: three of the four `preToolUse` hooks are `failClosed: true`
+  (`.cursor/hooks.json`), so a hook that fails blocks the tool by design. An intermittent failure in a
+  fail-closed gate blocks work at random, and the observer's natural response - retry until it passes -
+  is training to step past a gate without reading it, which is what rule 08 forbids. Retrying is what
+  unblocked this one.
+- What was done: retried, and the write landed; the four hooks were then verified by direct invocation
+  to allow the same payload. No hook was edited, and no hook was worked around - the proposal was
+  written through the normal tool path.
+- Next: measure instead of guessing. `scripts/selftest.mjs` already drives the hooks, so add a case
+  that invokes each `preToolUse` hook with the BOM payload and asserts exit 0 with a parseable verdict,
+  and run it repeatedly. A hook that has started failing intermittently should be caught by the sensor,
+  not by a blocked write.
+
+### 2026-09-26 - the fail-closed hook timeout was measured, and the machine was the cause
+- Symptom: the 2026-09-25 entry left the cause "not established". This session it reproduced with a
+  name: `secret-guard.cjs` and `ui-guard.cjs` each refused a write ("failed with exit code 1"), both
+  `failClosed: true`, and the refusal cleared on its own minutes later with no hook change.
+- Root cause: **measured, and it is machine load, not stdin.** Each guard was invoked directly with a
+  realistic payload while two Codex workers ran: `ui-guard` 10722 ms and then 6069 ms,
+  `secret-guard` 3976 ms, `codex-gate` 6898 ms, `policy-guard` 2061 ms, against a `timeout` of 10 s in
+  `.cursor/hooks.json`. One measured `ui-guard` run exceeded the timeout, was killed, exited 1, and
+  `failClosed` turned that into a refused write. With the workers finished a bare process spawn is
+  307 ms and `git rev-parse --short HEAD` is 617 ms, and the same writes succeed. The stdin-EOF theory
+  in the earlier entry does not fit this: an empty stdin makes every guard exit 0 with an allow (the
+  `codex-gate` probe in the same run did exactly that), never exit 1.
+- Fix class: hook
+- Evidence: the five wall times above; the same write landing with no code change once the machine was
+  idle; the workers' own shells taking 22.8 s to 47.8 s for `git status` and `git diff --numstat`.
+- Change made: recorded. A hook that is killed by its own `timeout` is indistinguishable from one that
+  crashed, so the fix is either a longer `timeout` on the four guards or a sensor case that fails when a
+  guard's wall time approaches the configured limit - a fail-closed gate must not fail because the
+  machine was busy.
+
+### 2026-09-26 - the worker ledger called a BLOCKED worker DONE
+- Symptom: `node scripts/codex-run.mjs list` printed `DONE` for both workers of this task, and the
+  plan was built on that until `.last.md` was read.
+- Root cause: the meta `status` is set to `done` from the process exit code. Both workers exited 0
+  after replying `BLOCKED ...`, so the ledger reported success for two runs that did no work. The
+  worker's own verdict exists only in `.last.md`, and nothing read it.
+- Fix class: sensor
+- Evidence: `auth-backend.meta.json` `"status": "done"`, `"exitCode": 0`, while
+  `auth-backend.last.md` is `BLOCKED File-edit tool did not complete the required persistence patch`;
+  `auth-storefront` identical.
+- Change made: recorded. `list` should derive the verdict from `.last.md` (or the status should be
+  `blocked`) so that "the process ended" can never be read as "the task finished" - this is a
+  self-report trusted by a sensor, which is the defect rule 08 names.
+
+### 2026-09-26 - the Codex worker in this environment has no file tools at all
+- Symptom: three workers in a row returned `BLOCKED` without implementing the task. The first spent its
+  budget reading files through shell (`git diff --numstat` 47.8 s, `git status --short` 34.9 s) and was
+  killed at a 22.8 s tool limit; the third refused immediately and said why.
+- Root cause: the Codex CLI here exposes **shell only** - no file reader, no search. A brief that
+  forbids shell round-trips (the correct instinct, given the timings) makes the task impossible, and a
+  brief that permits them is bounded by a shell where a trivial command costs half a minute under load.
+  The ladder in `AGENTS.md` assumes a worker can read and write files; here rung 1 cannot.
+- Fix class: AGENTS.md
+- Evidence: the third worker's verbatim verdict, `BLOCKED File reader and search tools are unavailable;
+  the only available filesystem access is shell, which you prohibited except for verification`, plus the
+  timed commands above.
+- Change made: the work was moved to rung 2 (Cursor implementer subagents, which do have file tools)
+  and reported as such. The briefs were mine; the shell prohibition in them was the defect, not the
+  worker.
+
+### 2026-09-26 - browser screenshots do not land where the tool says they do
+- Symptom: `browser_take_screenshot` reported saving `.velmor\ux-verify\en-checkout-signed-out-1440.png`,
+  the workspace had no such file, and `Read` on the copy that was later placed under the workspace
+  returned `Permission denied` while the same file under `C:\Users\vsobo\` read fine.
+- Root cause: the Playwright MCP resolves a relative filename against its own allowed roots, not the
+  workspace, so the files were written to `C:\Users\vsobo\.velmor\ux-verify\`. The tool's own refusal of
+  an absolute workspace path names them: `Allowed roots: C:\Users\vsobo\.playwright-mcp, C:\Users\vsobo`.
+  A workspace path under `.velmor/` is also not readable by the file tool.
+- Fix class: sensor
+- Evidence: the tool's error message quoting the allowed roots; `Get-ChildItem` finding all nine PNGs
+  under the user profile and none in the repository.
+- Change made: recorded. Capture evidence to an absolute path inside the MCP's allowed root, then copy
+  it into `.velmor/ux-verify/<change>/` with a shell copy, which can write anywhere. A verification step
+  that reports a path it did not write is a step that cannot be trusted.
