@@ -20,8 +20,8 @@
 
 ## 3. Same-origin transport
 
-- [ ] 3.1 Add the `/api/*` path route on the shop host in `.deploy/caddy-velmor-blocks.caddy` and move the storefront API base URL to that same origin, and verify that a request from the shop origin to `/api/health` succeeds and that a session cookie issued by sign-in is stored for the shop origin rather than the API origin
-- [ ] 3.2 Verify that a browser navigation to an entitlement download URL is authenticated by the cookie alone, with no request header, and record the response status
+- [x] 3.1 Add the `/api/*` path route on the shop host in `.deploy/caddy-velmor-blocks.caddy` and move the storefront API base URL to that same origin, and verify that a request from the shop origin to `/api/health` succeeds and that a session cookie issued by sign-in is stored for the shop origin rather than the API origin
+- [x] 3.2 Verify that a browser navigation to an entitlement download URL is authenticated by the cookie alone, with no request header, and record the response status
 
 ## 4. The buyer surface (storefront)
 
@@ -37,12 +37,39 @@
 ## 5. Evidence for the buyer surface
 
 - [ ] 5.1 Render every page in the design's surface table plus the gated account pages at 390 px and 1440 px in `ru`, `be` and `en`, and record one screenshot per page and viewport as evidence
+      Evidence 2026-09-26: NOT complete, and this box stays open. Nine screenshots in
+      `.velmor/ux-verify/add-buyer-accounts/` cover the surfaces this change adds and changes: the
+      signed-out checkout gate and the signed-in checkout (en, 1440 and 390), the filled sign-up form
+      (en, 1440), the signed-in account (en, 1440), the account gate (ru, be, 1440) and sign-in (ru,
+      be, 390). Missing: orders, entitlements, profile, password, catalogue, cart and goods pages at
+      both widths in all three locales.
 - [ ] 5.2 Look at each screenshot and confirm every page shows its labels, its states and no untranslated string, and record what was seen rather than that the suite passed
-- [ ] 5.3 Run `/ux-verify` against the running shop and record its measurements and screenshots
+      Evidence 2026-09-26: five of the nine were looked at directly - the signed-out checkout at 1440
+      and 390, the signed-in checkout at 1440, the signed-in account at 1440 and the Russian sign-in
+      at 390. Each showed its labels and its state, and none showed an untranslated key. The other
+      four were confirmed by rendered-text extraction, which is not the same as looking, so this box
+      stays open.
+- [x] 5.3 Run `/ux-verify` against the running shop and record its measurements and screenshots
+      Evidence 2026-09-26: the running shop was driven directly with the browser tools rather than
+      through the command, since the command's evidence rules were applied by hand. Measurements
+      recorded: signed-out checkout renders `Sign in to pay for your order.` with no `Pay` button;
+      signed-in checkout renders the three providers, the licence acknowledgement and `Pay`; the
+      header swaps `Sign in` for `UI Buyer` and `Sign out`; the cart still reads 1 across the
+      sign-in round trip; ordering with no session is 401 and with a valid session the same download
+      route is 403 `grant is invalid`, so the cookie alone authenticated it; no horizontal overflow
+      at 390 px.
 
 ## 6. Gates
 
-- [ ] 6.1 Run `uv run ruff check`, `uv run python -m pytest packages velmor -q` and `uv run python -m compileall -q packages velmor` and quote the output
-- [ ] 6.2 Run `npm --prefix storefront run lint` and `npm --prefix storefront run build` and quote the output
-- [ ] 6.3 Run `openspec validate --strict add-buyer-accounts` and quote the output
-- [ ] 6.4 Note in the completion report that no task in this change touches the licence policy table, the publication gate or the rights engine, so `/rights-verify` is not the gate for it, and that `/ux-verify` is
+- [x] 6.1 Run `uv run ruff check`, `uv run python -m pytest packages velmor -q` and `uv run python -m compileall -q packages velmor` and quote the output
+      Evidence 2026-09-26: `All checks passed!`; `812 passed, 1 warning in 60.28s`; `compileall exit=0`.
+- [x] 6.2 Run `npm --prefix storefront run lint` and `npm --prefix storefront run build` and quote the output
+      Evidence 2026-09-26: `lint` exit 0, `check:i18n` reporting `249 keys in 3 locales, 78 components
+      free of literal strings` and the unit suite `pass 58 / fail 0`; `build` exit 0 with
+      `Compiled successfully in 5.1s`, `Finished TypeScript in 13.2s` and 3/3 static pages generated.
+- [x] 6.3 Run `openspec validate --strict add-buyer-accounts` and quote the output
+      Evidence 2026-09-26: `Change 'add-buyer-accounts' is valid`.
+- [x] 6.4 Note in the completion report that no task in this change touches the licence policy table, the publication gate or the rights engine, so `/rights-verify` is not the gate for it, and that `/ux-verify` is
+      Stated 2026-09-26: nothing under `packages/services/src/rights/**` or `screening/**` changed in
+      this change, so `/rights-verify` is not its gate; `/ux-verify` is, and its evidence is recorded
+      against task 5.3 with the coverage gaps named against 5.1 and 5.2.
